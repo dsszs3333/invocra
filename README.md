@@ -48,7 +48,7 @@ brew install dsszs3333/tap/invocra
 invocra --version
 ```
 
-The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) builds v0.1.0
+The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) builds v0.1.1
 from source. Homebrew installs Rust as a build dependency; installation can take several minutes.
 
 To update an existing installation:
@@ -60,15 +60,15 @@ brew upgrade dsszs3333/tap/invocra
 
 ### Linux x86_64 release
 
-Download [v0.1.0](https://github.com/dsszs3333/invocra/releases/tag/v0.1.0), verify the checksum and install the binary:
+Download [v0.1.1](https://github.com/dsszs3333/invocra/releases/tag/v0.1.1), verify the checksum and install the binary:
 
 ```bash
 mkdir -p invocra-download
 cd invocra-download
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.0/invocra-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.0/SHA256SUMS
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.1/invocra-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.1/SHA256SUMS
 sha256sum --check SHA256SUMS
-tar -xzf invocra-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf invocra-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
 install -Dm755 invocra "$HOME/.local/bin/invocra"
 "$HOME/.local/bin/invocra" --version
 ```
@@ -78,7 +78,7 @@ Ensure `~/.local/bin` is on your `PATH`. This archive requires Linux x86_64 and 
 ### From a pinned Git tag (Rust 1.88 or newer)
 
 ```bash
-cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.1.0 --locked invocra
+cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.1.1 --locked invocra
 invocra --version
 ```
 
@@ -237,12 +237,18 @@ need the API; offline mode cannot perform actions. `INVOCRA_GITLAB_TOKEN` applie
 instances, so use URL-specific keyring entries when servers need different credentials.
 
 The 85×13 ritual composition appears above the first-run setup fields and in the empty log panel.
-Press `4`, then `+` to expand the log panel. If the available area is too small, only the compact
-Invocra title is shown; the drawing never wraps or renders partially.
+Press `4`, then `+` to expand the log panel. Smaller areas show only the 28×4 Gothic wordmark;
+if that cannot fit either, they show a plain Invocra title. The drawing never wraps or renders
+partially, and uses the terminal's default foreground and background colors.
 
 The [terminal composition](crates/tui/src/render/invocra.txt) preserves the supplied ASCII pentacle
 and three candles. Its wordmark encodes the Terminal Gothic bitmap glyphs as Unicode Braille cells,
 so it uses the terminal's own font and requires Braille glyph support. No TTF is loaded by the app.
+
+## Credits
+
+The README banner and TUI wordmark use [Terminal Gothic](https://littlebitspace.com/resources/#TerminalGothic)
+by [littlebitspace](https://littlebitspace.com/). The TUI adapts its bitmap glyphs into Unicode Braille cells.
 
 ## Trademarks
 

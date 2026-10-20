@@ -8,10 +8,6 @@ use super::state::{OnboardingState, Step, Tab};
 use crate::render::invocra;
 
 pub(super) fn render(frame: &mut Frame, state: &OnboardingState) {
-    frame.render_widget(
-        Block::default().style(Style::default().fg(invocra::IVORY).bg(invocra::BACKGROUND)),
-        frame.area(),
-    );
     match state.step {
         Step::Url => render_field(frame, state, "GitLab URL", &state.url, false),
         Step::Token => {
@@ -38,6 +34,9 @@ fn render_field(frame: &mut Frame, state: &OnboardingState, label: &str, value: 
     let art_height = if screen.width >= invocra::ART_WIDTH
         && screen.height > invocra::ART_HEIGHT + form_height {
         invocra::ART_HEIGHT
+    } else if screen.width >= invocra::WORDMARK_WIDTH
+        && screen.height > invocra::WORDMARK_HEIGHT + form_height {
+        invocra::WORDMARK_HEIGHT
     } else {
         1
     };
@@ -160,7 +159,7 @@ mod tests {
     #[test]
     fn startup_keeps_the_form_below_the_art_and_uses_a_compact_header_when_it_cannot_fit() {
         let state = OnboardingState::new("https://gitlab.com".into());
-        for (width, height, full_art) in [(120, 36, true), (85, 25, true), (84, 25, false), (85, 24, false)] {
+        for (width, height, art_height) in [(120, 36, 13), (85, 25, 13), (84, 25, 4), (85, 24, 4), (84, 16, 4), (84, 15, 1), (27, 16, 1)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
             terminal.draw(|frame| render(frame, &state)).expect("draw startup");
             let buffer = terminal.backend().buffer();
@@ -168,12 +167,20 @@ mod tests {
                 .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
                 .collect();
             assert!(rows.iter().any(|row| row.contains("Step 1/3")));
-            assert!(rows.iter().any(|row| row.contains("https://gitlab.com")));
-            if full_art {
-                let top = usize::from((height - 25) / 2);
-                let left = usize::from((width - invocra::ART_WIDTH) / 2);
-                for (y, line) in include_str!("../render/invocra.txt").lines().enumerate() {
-                    let actual: String = rows[top + y].chars().skip(left).take(usize::from(invocra::ART_WIDTH)).collect();
+            if width >= 84 {
+                assert!(rows.iter().any(|row| row.contains("https://gitlab.com")));
+            }
+            assert!(buffer.content().iter().all(|cell| cell.bg == Color::Reset));
+            if art_height > 1 {
+                let (art, art_width) = if art_height == 13 {
+                    (include_str!("../render/invocra.txt"), invocra::ART_WIDTH)
+                } else {
+                    (include_str!("../render/invocra-wordmark.txt"), invocra::WORDMARK_WIDTH)
+                };
+                let top = usize::from((height - art_height - 12) / 2);
+                let left = usize::from((width - art_width) / 2);
+                for (y, line) in art.lines().enumerate() {
+                    let actual: String = rows[top + y].chars().skip(left).take(usize::from(art_width)).collect();
                     assert_eq!(actual, line, "startup artwork row {y}");
                 }
             } else {

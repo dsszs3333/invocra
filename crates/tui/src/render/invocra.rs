@@ -6,36 +6,43 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 const ART: &str = include_str!("invocra.txt");
+const WORDMARK: &str = include_str!("invocra-wordmark.txt");
 pub(crate) const ART_WIDTH: u16 = 85;
 pub(crate) const ART_HEIGHT: u16 = 13;
+pub(crate) const WORDMARK_WIDTH: u16 = 28;
+pub(crate) const WORDMARK_HEIGHT: u16 = 4;
 const TITLE: &str = "Invocra";
 const HINT: &str = "Select a job in the pipeline panel and press Enter to view its log.";
-pub(crate) const IVORY: Color = Color::Rgb(0xE8, 0xE4, 0xDC);
-pub(crate) const BACKGROUND: Color = Color::Rgb(0x0B, 0x0D, 0x10);
 const MUTED: Color = Color::Rgb(0x9A, 0x97, 0x88);
 
 pub(crate) fn render_placeholder(frame: &mut Frame, area: Rect) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    frame.render_widget(Block::default().style(Style::default().bg(BACKGROUND)), area);
-    if area.width >= ART_WIDTH && area.height >= ART_HEIGHT {
-        let hint_rows = if area.height >= ART_HEIGHT + 2 { 2 } else { 0 };
-        let y = area.y + (area.height - ART_HEIGHT - hint_rows) / 2;
-        let art_area = Rect::new(area.x + (area.width - ART_WIDTH) / 2, y, ART_WIDTH, ART_HEIGHT);
-        // Paragraphs do not wrap unless Wrap is set; leading spaces position the whole drawing.
-        frame.render_widget(Paragraph::new(ART).style(Style::default().fg(IVORY)), art_area);
-        if hint_rows > 0 {
-            render_hint(frame, Rect::new(area.x, y + ART_HEIGHT + 1, area.width, 1));
+    frame.render_widget(Block::default().style(Style::reset()), area);
+    let (art, width, height) = if area.width >= ART_WIDTH && area.height >= ART_HEIGHT {
+        (ART, ART_WIDTH, ART_HEIGHT)
+    } else if area.width >= WORDMARK_WIDTH && area.height >= WORDMARK_HEIGHT {
+        (WORDMARK, WORDMARK_WIDTH, WORDMARK_HEIGHT)
+    } else {
+        if area.width >= TITLE.len() as u16 {
+            let y = area.y + (area.height - 1) / 2;
+            frame.render_widget(
+                Paragraph::new(TITLE)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+                Rect::new(area.x, y, area.width, 1),
+            );
         }
-    } else if area.width >= TITLE.len() as u16 {
-        let y = area.y + (area.height - 1) / 2;
-        frame.render_widget(
-            Paragraph::new(TITLE)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(IVORY).add_modifier(Modifier::BOLD)),
-            Rect::new(area.x, y, area.width, 1),
-        );
+        return;
+    };
+    let hint_rows = if width == ART_WIDTH && area.height >= ART_HEIGHT + 2 { 2 } else { 0 };
+    let y = area.y + (area.height - height - hint_rows) / 2;
+    let art_area = Rect::new(area.x + (area.width - width) / 2, y, width, height);
+    // Paragraphs do not wrap unless Wrap is set; leading spaces position the whole drawing.
+    frame.render_widget(Paragraph::new(art), art_area);
+    if hint_rows > 0 {
+        render_hint(frame, Rect::new(area.x, y + height + 1, area.width, 1));
     }
 }
 
@@ -66,14 +73,14 @@ mod tests {
             let actual: String = (0..ART_WIDTH).map(|x| buffer[(x, y as u16)].symbol()).collect();
             assert_eq!(actual, line, "row {y}");
             for x in 0..ART_WIDTH {
-                assert_eq!(buffer[(x, y as u16)].fg, IVORY);
-                assert_eq!(buffer[(x, y as u16)].bg, BACKGROUND);
+                assert_eq!(buffer[(x, y as u16)].fg, Color::Reset);
+                assert_eq!(buffer[(x, y as u16)].bg, Color::Reset);
             }
         }
     }
 
     #[test]
-    fn art_is_centered_as_a_block_and_small_panes_use_invocra_title() {
+    fn art_is_centered_as_a_block() {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
         terminal.draw(|frame| render_placeholder(frame, frame.area())).expect("draw");
         let buffer = terminal.backend().buffer();
@@ -81,10 +88,43 @@ mod tests {
             let actual: String = (0..ART_WIDTH).map(|x| buffer[(x + 7, y as u16 + 7)].symbol()).collect();
             assert_eq!(actual, line, "row {y}");
         }
-        let mut terminal = Terminal::new(TestBackend::new(60, 20)).expect("terminal");
-        terminal.draw(|frame| render_placeholder(frame, frame.area())).expect("draw");
-        let row: String = (0..60).map(|x| terminal.backend().buffer()[(x, 9)].symbol()).collect();
-        assert_eq!(row.trim(), TITLE);
+    }
+
+    #[test]
+    fn smaller_panes_show_the_complete_centered_gothic_wordmark_without_the_scene() {
+        let original: Vec<String> = ART.lines().skip(5).take(4)
+            .map(|line| line.chars().skip(46).take(usize::from(WORDMARK_WIDTH)).collect())
+            .collect();
+        assert_eq!(WORDMARK.lines().collect::<Vec<_>>(), original);
+        for (width, height) in [(84, 13), (85, 12), (28, 4), (40, 12), (60, 20)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+            terminal.draw(|frame| render_placeholder(frame, frame.area())).expect("draw");
+            let left = (width - WORDMARK_WIDTH) / 2;
+            let top = (height - WORDMARK_HEIGHT) / 2;
+            for y in 0..height {
+                let expected = if (top..top + WORDMARK_HEIGHT).contains(&y) {
+                    WORDMARK.lines().nth(usize::from(y - top)).expect("wordmark row")
+                } else { "" };
+                for x in 0..width {
+                    let cell = &terminal.backend().buffer()[(x, y)];
+                    let ch = x.checked_sub(left).and_then(|dx| expected.chars().nth(usize::from(dx))).unwrap_or(' ');
+                    assert_eq!(cell.symbol(), ch.to_string(), "{width}×{height} cell {x},{y}");
+                    assert_eq!((cell.fg, cell.bg), (Color::Reset, Color::Reset));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn panes_too_small_for_the_gothic_wordmark_show_a_plain_title() {
+        for (width, height) in [(27, 4), (28, 3), (7, 1), (40, 3)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+            terminal.draw(|frame| render_placeholder(frame, frame.area())).expect("draw");
+            let buffer = terminal.backend().buffer();
+            let row: String = (0..width).map(|x| buffer[(x, (height - 1) / 2)].symbol()).collect();
+            assert_eq!(row.trim(), TITLE);
+            assert!(!buffer.content().iter().any(|cell| cell.symbol().chars().any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch))));
+        }
     }
 
     #[test]

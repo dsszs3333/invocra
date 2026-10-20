@@ -15,7 +15,8 @@ The config/cache directory is `~/.config/invocra`, the OS keyring service is
 `invocra`, and the token environment variable is `INVOCRA_GITLAB_TOKEN`.
 The 85×13 text composition (ASCII scene and Terminal Gothic glyphs encoded as Unicode Braille)
 is embedded in the TUI crate and shared by the setup header and empty log pane. It is centered
-on an ivory/dark palette without wrapping; smaller areas show only the compact title.
+without wrapping using the terminal's default foreground and background colors. Smaller areas
+show the 28×4 Gothic wordmark alone, then a plain title if even the wordmark cannot fit.
 The public source repository is https://github.com/dsszs3333/invocra;
 all workspace packages inherit that URL in Cargo metadata.
 
