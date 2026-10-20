@@ -1,12 +1,6 @@
 # Invocra
 
-```text
- ___
-|_ _| _ __ __   __ ___    ___  _ __  __ _
- | | | '_ \ \ / // _ \  / __|| '__|/ _` |
- | | | | | |\ V /| (_) || (__ | |  | (_| |
-|___||_| |_| \_/  \___/  \___||_|   \__,_|
-```
+![Invocra ritual: a pentacle on the left, two candles before the name and one after it](assets/invocra-ritual.png)
 
 A terminal dashboard for GitLab™ CI across projects and servers. Keep several
 projects in view, follow a different branch in each, inspect job logs and retry
@@ -242,8 +236,13 @@ The cache contains only snapshots and ref pins. Logs, variables, branches and MR
 need the API; offline mode cannot perform actions. `INVOCRA_GITLAB_TOKEN` applies to all configured
 instances, so use URL-specific keyring entries when servers need different credentials.
 
-The 88×24 Invocra wordmark is embedded in the empty log panel. It is shown whenever the pane
-has room for all 24 rows; press `4`, then `+` to expand it. Smaller panes show a compact title and hint.
+The 85×13 ritual composition appears above the first-run setup fields and in the empty log panel.
+Press `4`, then `+` to expand the log panel. If the available area is too small, only the compact
+Invocra title is shown; the drawing never wraps or renders partially.
+
+The [terminal composition](crates/tui/src/render/invocra.txt) preserves the supplied ASCII pentacle
+and three candles. Its wordmark encodes the Terminal Gothic bitmap glyphs as Unicode Braille cells,
+so it uses the terminal's own font and requires Braille glyph support. No TTF is loaded by the app.
 
 ## Trademarks
 

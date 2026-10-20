@@ -1,2 +1,2 @@
-# Fixed-width ASCII art deliberately pads every row, including empty rows, to 88 columns.
+# Fixed-width terminal composition deliberately preserves trailing spaces on every row.
 crates/tui/src/render/invocra.txt whitespace=-blank-at-eol,-blank-at-eof

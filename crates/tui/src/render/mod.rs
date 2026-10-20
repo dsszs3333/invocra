@@ -1,6 +1,6 @@
 pub(crate) mod branches_panel;
 pub(crate) mod detail_panel;
-mod invocra;
+pub(crate) mod invocra;
 mod help_bar;
 mod mr_panel;
 pub(crate) mod overlays;
