@@ -1,0 +1,28 @@
+# Bundled sample: each [[instance]] is one GitLab server. Add blocks to track
+# several servers; switch between them in the dashboard with the `[` and `]` keys.
+#
+# Projects of a group are resolved automatically on every refresh. Reference a
+# group either by numeric id or by full path (not both).
+
+[[instance]]
+url = "https://gitlab.com"
+# An https:// url is required. For a self-hosted instance reachable only over a
+# trusted network (e.g. VPN) you may opt in to plaintext http with:
+#   allow_insecure_http = true
+# Leave it off otherwise: the token would be sent in the clear.
+
+# [[instance.group]]
+# path = "my-org/backend"
+# include_subgroups = true
+
+[[instance.project]]
+name = "api"
+id = 12345
+
+[[instance.project]]
+name = "frontend"
+id = 56789
+
+[[instance.project]]
+name = "admin"
+id = 77777

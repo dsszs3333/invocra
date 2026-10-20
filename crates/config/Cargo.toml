@@ -1,0 +1,17 @@
+[package]
+name = "invocra-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "TOML config handling for invocra, a GitLab CI/CD TUI dashboard"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tempfile.workspace = true

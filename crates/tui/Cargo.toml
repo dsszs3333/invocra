@@ -1,0 +1,27 @@
+[package]
+name = "invocra-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Ratatui dashboard widgets for invocra, a GitLab CI/CD TUI dashboard"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+config = { package = "invocra-config", path = "../config", version = "0.1.0" }
+crossterm.workspace = true
+gitlab = { package = "invocra-gitlab", path = "../gitlab", version = "0.1.0" }
+ratatui.workspace = true
+ring.workspace = true
+serde.workspace = true
+storage = { package = "invocra-storage", path = "../storage", version = "0.1.0" }
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,48 @@
+[workspace]
+members = ["crates/app", "crates/config", "crates/gitlab", "crates/storage", "crates/tui"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT"
+authors = ["Alexander Masaev <dsszs3333@gmail.com>"]
+rust-version = "1.88"
+repository = "https://github.com/dsszs3333/invocra"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = 10 }
+perf = { level = "deny", priority = 9 }
+redundant_clone = { level = "deny", priority = 8 }
+manual_ok_or = { level = "deny", priority = 7 }
+needless_collect = { level = "deny", priority = 6 }
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.28"
+httpmock = "0.8"
+keyring = { version = "3.6", features = ["apple-native", "linux-native", "windows-native"] }
+ratatui = "0.29"
+ring = "0.17"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "socks"] }
+rpassword = "7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+urlencoding = "2"
+
+# Optimized build that keeps debug symbols, so dhat heap stacks have real names.
+# Use: cargo run -p invocra --profile profiling --features dhat-heap
+[profile.profiling]
+inherits = "release"
+debug = true

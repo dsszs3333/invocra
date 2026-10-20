@@ -1,0 +1,18 @@
+[package]
+name = "invocra-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Keyring + offline cache storage for invocra, a GitLab CI/CD TUI dashboard"
+
+[lints]
+workspace = true
+
+[dependencies]
+keyring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
