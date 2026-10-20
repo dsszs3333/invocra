@@ -1,6 +1,20 @@
 # Invocra
 
-![Invocra ritual: a pentacle on the left, two candles before the name and one after it](assets/invocra-ritual.png)
+```text
+                                        .
+        _..---.._                      (;)
+     .-'         '-.                    |
+   .'       /\      '.               .-----.                                     .
+  /        /  \       \              |~. .~|                                    (;)
+ ;   .----/----\----.  ;       .     | ' ` |  ⡠⢤⡀⡀                               |
+ |    `-./      \.-'   |      (;)    |     |  ⠑⢀⡭⠂⢀ ⡀ ⡀ ⢀ ⢀⣀⡀  ⣀⣀ ⢀⢀⡀  ⣀⣀     .-----.
+ |      /`-. .-'\      |       |     |     |   ⠈⣷ ⢹⡏⣿ ⠹⡆⢹⠇⣿ ⢻⠄⣼⠃⠈⡁⢹⡏⠋ ⣼⠁⢸⠇    |~. .~|
+ |     /   `X'   \     |    .-----.  |     |  ⠊⠑⠋ ⠈⠃⠙⠂⠈⠛⠊ ⠙⠓⠊ ⠙⠒⠋⠁⠈⠓  ⠙⠒⠙⠂    | ' ` |
+ ;    / .-'   '-. \    ;    |~. .~|  |     |                                  |     |
+  \  /-'         '-\  /     | ' ` |  |     |                                  |     |
+   '.               .'      |_____|  |_____|                                  |_____|
+     '-._________.-'        `-----'  `-----'                                  `-----'
+```
 
 A terminal dashboard for GitLab™ CI across projects and servers. Keep several
 projects in view, follow a different branch in each, inspect job logs and retry
