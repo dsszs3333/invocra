@@ -80,7 +80,7 @@ impl HttpClient {
 
         for _ in 0..MAX_PAGES {
             let url = format!("{}{}&page={page}", self.base_url, path_with_query);
-            let response = self.send_get(&url).await?;
+            let response = self.send_get(&url, None).await?;
 
             let next_page = next_page_from_headers(response.headers())?;
 
@@ -217,7 +217,7 @@ impl HttpClient {
         T: for<'de> Deserialize<'de>,
     {
         let url = format!("{}{}", self.base_url, path);
-        let response = self.send_get(&url).await?;
+        let response = self.send_get(&url, None).await?;
 
         response
             .json::<T>()
@@ -225,17 +225,23 @@ impl HttpClient {
             .map_err(|source| GitLabError::Decode { url, source })
     }
 
-    pub(super) async fn send_get(&self, url: &str) -> Result<reqwest::Response> {
+    pub(super) async fn send_get(
+        &self,
+        url: &str,
+        range: Option<&str>,
+    ) -> Result<reqwest::Response> {
         for attempt in 0..2 {
-            let response =
-                self.client
-                    .get(url)
-                    .send()
-                    .await
-                    .map_err(|source| GitLabError::Request {
-                        url: url.to_owned(),
-                        source,
-                    })?;
+            let mut request = self.client.get(url);
+            if let Some(range) = range {
+                request = request.header(reqwest::header::RANGE, range);
+            }
+            let response = request
+                .send()
+                .await
+                .map_err(|source| GitLabError::Request {
+                    url: url.to_owned(),
+                    source,
+                })?;
 
             if attempt == 0 && response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 let wait = retry_after(response.headers())
@@ -316,25 +322,9 @@ impl HttpClient {
             "{}/api/v4/projects/{project_id}/jobs/{job_id}/trace",
             self.base_url
         );
-        let response = self
-            .client
-            .get(&url)
-            // Ask for only the tail we keep, so a huge log isn't downloaded in full just to be
-            // truncated. Servers that ignore Range return the whole body; truncate_trace_tail then
-            // trims it as before.
-            .header("Range", format!("bytes=-{MAX_TRACE_BYTES}"))
-            .send()
-            .await
-            .map_err(|source| GitLabError::Request {
-                url: url.clone(),
-                source,
-            })?
-            .error_for_status()
-            .map_err(|source| GitLabError::Status {
-                url: url.clone(),
-                status: source.status().map(|status| status.as_u16()),
-                source,
-            })?;
+        // Request only the retained tail; servers that ignore Range are truncated locally.
+        let range = format!("bytes=-{MAX_TRACE_BYTES}");
+        let response = self.send_get(&url, Some(&range)).await?;
 
         let text = response
             .text()

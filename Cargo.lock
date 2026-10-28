@@ -682,7 +682,7 @@ checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
 name = "invocra"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "invocra-config"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "tempfile",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "invocra-gitlab"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "httpmock",
  "reqwest",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "invocra-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "keyring",
  "serde",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "invocra-tui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "crossterm",

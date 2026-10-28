@@ -42,7 +42,7 @@ pub enum GitLabError {
         #[source]
         source: reqwest::Error,
     },
-    #[error("GitLab returned error for {url}")]
+    #[error("GitLab returned error for {url}: {source}")]
     Status {
         url: String,
         /// HTTP status code GitLab responded with, as a raw `u16` so the public API does not leak
@@ -646,6 +646,7 @@ impl GitLabClient {
     #[instrument(skip(self))]
     /// Fetches a job log. Logs can reach ~100 MB on gitlab.com, so only the last
     /// [`MAX_TRACE_BYTES`] bytes are kept (cut on a line boundary, with a truncation marker).
+    /// Rate-limited reads (HTTP 429) are retried once using the same policy as JSON reads.
     ///
     /// # Errors
     ///
@@ -1759,6 +1760,43 @@ mod tests {
 
         mock.assert_async().await;
         assert_eq!(trace, "step one\nstep two\n");
+    }
+
+    #[tokio::test]
+    async fn get_job_trace_retries_once_after_429_with_range() {
+        let server = httpmock::MockServer::start_async().await;
+        let throttled = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/7/jobs/10/trace")
+                    .header("range", format!("bytes=-{}", super::MAX_TRACE_BYTES));
+                then.status(429).header("retry-after", "0");
+            })
+            .await;
+
+        let client = super::GitLabClient::new(server.base_url(), "token", None).expect("client");
+        let err = client.get_job_trace(7, 10).await.expect_err("still throttled");
+
+        throttled.assert_calls_async(2).await;
+        assert_eq!(err.http_status(), Some(429));
+    }
+
+    #[tokio::test]
+    async fn get_job_trace_reports_404_without_retrying() {
+        let server = httpmock::MockServer::start_async().await;
+        let missing = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/7/jobs/10/trace");
+                then.status(404);
+            })
+            .await;
+
+        let client = super::GitLabClient::new(server.base_url(), "token", None).expect("client");
+        let err = client.get_job_trace(7, 10).await.expect_err("missing log");
+
+        missing.assert_calls_async(1).await;
+        assert!(err.to_string().contains("404"), "{err}");
     }
 
     #[tokio::test]

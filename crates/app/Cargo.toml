@@ -25,10 +25,10 @@ dhat-heap = ["dep:dhat"]
 dhat = { version = "0.3", optional = true }
 anyhow.workspace = true
 clap.workspace = true
-config = { package = "invocra-config", path = "../config", version = "0.2.0" }
-gitlab = { package = "invocra-gitlab", path = "../gitlab", version = "0.2.0" }
+config = { package = "invocra-config", path = "../config", version = "0.2.1" }
+gitlab = { package = "invocra-gitlab", path = "../gitlab", version = "0.2.1" }
 rpassword.workspace = true
-storage = { package = "invocra-storage", path = "../storage", version = "0.2.0" }
+storage = { package = "invocra-storage", path = "../storage", version = "0.2.1" }
 tokio.workspace = true
 tracing-subscriber.workspace = true
-tui = { package = "invocra-tui", path = "../tui", version = "0.2.0" }
+tui = { package = "invocra-tui", path = "../tui", version = "0.2.1" }
