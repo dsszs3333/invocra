@@ -51,9 +51,8 @@ brew install dsszs3333/tap/invocra
 invocra --version
 ```
 
-The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) currently builds v0.1.1
-from source; its 0.2.0 update follows release verification. Homebrew installs Rust
-as a build dependency; installation can take several minutes.
+The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) builds v0.2.0
+from source. Homebrew installs Rust as a build dependency; installation can take several minutes.
 
 To update an existing installation:
 
