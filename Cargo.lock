@@ -681,76 +681,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
-name = "invocra"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "clap",
- "dhat",
- "invocra-config",
- "invocra-gitlab",
- "invocra-storage",
- "invocra-tui",
- "rpassword",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "invocra-config"
-version = "0.2.1"
-dependencies = [
- "serde",
- "tempfile",
- "thiserror",
- "toml",
-]
-
-[[package]]
-name = "invocra-gitlab"
-version = "0.2.1"
-dependencies = [
- "httpmock",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "urlencoding",
-]
-
-[[package]]
-name = "invocra-storage"
-version = "0.2.1"
-dependencies = [
- "keyring",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "invocra-tui"
-version = "0.2.1"
-dependencies = [
- "anyhow",
- "crossterm",
- "invocra-config",
- "invocra-gitlab",
- "invocra-storage",
- "ratatui",
- "ring",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1095,6 +1025,76 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "invocra"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dhat",
+ "invocra-config",
+ "invocra-gitlab",
+ "invocra-storage",
+ "invocra-tui",
+ "rpassword",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "invocra-config"
+version = "0.2.1"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "invocra-gitlab"
+version = "0.2.1"
+dependencies = [
+ "httpmock",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
+name = "invocra-storage"
+version = "0.2.1"
+dependencies = [
+ "keyring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "invocra-tui"
+version = "0.2.1"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "invocra-config",
+ "invocra-gitlab",
+ "invocra-storage",
+ "ratatui",
+ "ring",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
