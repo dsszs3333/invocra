@@ -60,6 +60,12 @@ pub(super) fn render(frame: &mut Frame, area: Rect, state: &AppState) {
             state.active_instance + 1,
             state.instance_labels.len()
         )
+    } else if state
+        .instance_labels
+        .first()
+        .is_some_and(|label| label == "DEMO")
+    {
+        format!("DEMO · {count}")
     } else {
         count
     };

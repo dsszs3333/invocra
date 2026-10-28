@@ -25,6 +25,7 @@ use tracing::{error, warn};
 
 mod actions;
 mod cache;
+mod demo;
 mod input;
 mod onboarding;
 mod picker;
@@ -32,7 +33,6 @@ mod refresh;
 mod render;
 mod state;
 
-pub use cache::{dashboard_cache_path, DASHBOARD_CACHE_FILE};
 pub use picker::run_project_picker;
 
 use actions::{
@@ -41,7 +41,7 @@ use actions::{
     spawn_pipelines_fetch, spawn_running_scan, spawn_tag_create, spawn_tags_fetch,
     spawn_trace_fetch, spawn_variables_fetch, ActionReport, VariablesError,
 };
-use input::Command;
+use input::{step, Command};
 pub use onboarding::run_onboarding;
 pub use refresh::RefreshSources;
 use refresh::{spawn_refresh, spawn_refresh_one, spawn_refresh_one_auto, RefreshReport};
@@ -61,7 +61,7 @@ struct InstanceMeta {
     url: String,
     client: GitLabClient,
     sources: RefreshSources,
-    store: LocalStateStore,
+    store: Option<LocalStateStore>,
 }
 
 /// Why the run loop returned: the user quit, or asked to add an instance (which suspends the
@@ -108,17 +108,29 @@ impl Dashboard {
         );
         let labels: Vec<String> = instances
             .iter()
-            .map(|inst| cache::instance_label(&inst.url))
+            .map(|inst| {
+                if inst.client.is_demo() {
+                    "DEMO".into()
+                } else {
+                    cache::instance_label(&inst.url)
+                }
+            })
             .collect();
         let mut metas = Vec::with_capacity(instances.len());
         for inst in instances {
-            let path = cache::instance_cache_path(&inst.url)
-                .context("failed to resolve dashboard cache path")?;
+            let store = if inst.client.is_demo() {
+                None
+            } else {
+                Some(LocalStateStore::from_path(
+                    cache::instance_cache_path(&inst.url)
+                        .context("failed to resolve dashboard cache path")?,
+                ))
+            };
             metas.push(InstanceMeta {
                 url: inst.url,
                 client: inst.client,
                 sources: inst.sources,
-                store: LocalStateStore::from_path(path),
+                store,
             });
         }
         let active = 0;
@@ -148,24 +160,43 @@ impl Dashboard {
         if key.1 != 0 {
             self.refreshes.retain(|&(project, pipeline), request| {
                 let keep = project != key.0 || pipeline == 0 || pipeline == key.1;
-                if !keep { if let Some(task) = &request.task { task.abort(); } }
+                if !keep {
+                    if let Some(task) = &request.task {
+                        task.abort();
+                    }
+                }
                 keep
             });
         }
         let generation = self.next_request();
-        if let Some(old) = self.refreshes.insert(key, PendingRefresh { generation, clears_pending: false, task: None }) {
-            if let Some(task) = old.task { task.abort(); }
+        if let Some(old) = self.refreshes.insert(
+            key,
+            PendingRefresh {
+                generation,
+                clears_pending: false,
+                task: None,
+            },
+        ) {
+            if let Some(task) = old.task {
+                task.abort();
+            }
         }
         generation
     }
 
     fn finish_project_request(&mut self, key: (u64, u64), generation: u64) -> bool {
-        let Some(request) = self.refreshes.get_mut(&key) else { return false; };
-        if request.generation != generation || request.task.take().is_none() { return false; }
+        let Some(request) = self.refreshes.get_mut(&key) else {
+            return false;
+        };
+        if request.generation != generation || request.task.take().is_none() {
+            return false;
+        }
         if key.1 == 0 && generation < self.completed_full_generation {
             if request.clears_pending {
                 self.state.pending_actions.remove(&key.0);
-                self.state.in_flight.retain(|(project_id, _)| *project_id != key.0);
+                self.state
+                    .in_flight
+                    .retain(|(project_id, _)| *project_id != key.0);
             }
             return false;
         }
@@ -173,18 +204,30 @@ impl Dashboard {
     }
 
     fn stop_refreshes(&mut self) {
-        if let Some((_, task)) = self.full_refresh.take() { task.abort(); }
+        if let Some((_, task)) = self.full_refresh.take() {
+            task.abort();
+        }
         for (_, request) in self.refreshes.drain() {
-            if let Some(task) = request.task { task.abort(); }
+            if let Some(task) = request.task {
+                task.abort();
+            }
         }
     }
 
     fn start_full_refresh(&mut self, tx: &mpsc::Sender<AppEvent>) {
-        if self.full_refresh.is_some() { return; }
+        if self.full_refresh.is_some() {
+            return;
+        }
         let generation = self.next_request();
         self.state.mark_refreshing();
-        let task = spawn_refresh(tx.clone(), self.instance_generation, generation,
-            self.active_client().clone(), self.state.refresh_sources().clone(), self.state.ref_overrides.clone());
+        let task = spawn_refresh(
+            tx.clone(),
+            self.instance_generation,
+            generation,
+            self.active_client().clone(),
+            self.state.refresh_sources().clone(),
+            self.state.ref_overrides.clone(),
+        );
         self.full_refresh = Some((generation, task.abort_handle()));
     }
 
@@ -192,13 +235,28 @@ impl Dashboard {
         if report.instance != self.instance_generation {
             return false;
         }
-        if self.full_refresh.as_ref().map(|(generation, _)| *generation) != Some(report.generation) { return false; }
+        if self
+            .full_refresh
+            .as_ref()
+            .map(|(generation, _)| *generation)
+            != Some(report.generation)
+        {
+            return false;
+        }
         self.full_refresh = None;
         self.completed_full_generation = report.generation;
         for snapshot in &mut report.snapshots {
-            if self.refreshes.get(&(snapshot.configured.id, 0))
-                .is_some_and(|request| request.generation > report.generation) {
-                if let Some(current) = self.state.items.iter().find(|item| item.configured.id == snapshot.configured.id) {
+            if self
+                .refreshes
+                .get(&(snapshot.configured.id, 0))
+                .is_some_and(|request| request.generation > report.generation)
+            {
+                if let Some(current) = self
+                    .state
+                    .items
+                    .iter()
+                    .find(|item| item.configured.id == snapshot.configured.id)
+                {
                     *snapshot = current.clone();
                 }
             }
@@ -206,21 +264,40 @@ impl Dashboard {
         true
     }
 
-    fn fetch_viewed_pipeline(&mut self, tx: &mpsc::Sender<AppEvent>, project_id: u64,
-        pipeline_project_id: u64, pipeline_id: u64) {
+    fn fetch_viewed_pipeline(
+        &mut self,
+        tx: &mpsc::Sender<AppEvent>,
+        project_id: u64,
+        pipeline_project_id: u64,
+        pipeline_id: u64,
+    ) {
         let key = (project_id, pipeline_id);
         let generation = self.start_project_request(key);
-        let task = spawn_pipeline_jobs_fetch(tx.clone(), self.instance_generation, generation,
-            self.active_client().clone(), project_id, pipeline_project_id, pipeline_id);
-        self.refreshes.insert(key, PendingRefresh { generation, clears_pending: false, task: Some(task.abort_handle()) });
+        let task = spawn_pipeline_jobs_fetch(
+            tx.clone(),
+            self.instance_generation,
+            generation,
+            self.active_client().clone(),
+            project_id,
+            pipeline_project_id,
+            pipeline_id,
+        );
+        self.refreshes.insert(
+            key,
+            PendingRefresh {
+                generation,
+                clears_pending: false,
+                task: Some(task.abort_handle()),
+            },
+        );
     }
 
     fn active_client(&self) -> &GitLabClient {
         &self.metas[self.active].client
     }
 
-    fn active_store(&self) -> &LocalStateStore {
-        &self.metas[self.active].store
+    fn active_store(&self) -> Option<&LocalStateStore> {
+        self.metas[self.active].store.as_ref()
     }
 
     /// Switches the active tab by `delta` (wrapping). Returns whether the active tab changed; when
@@ -230,7 +307,10 @@ impl Dashboard {
         if n <= 1 {
             return false;
         }
-        let next = (self.active as i32 + delta).rem_euclid(n as i32) as usize;
+        let active = i64::try_from(self.active).unwrap_or(i64::MAX);
+        let n = i64::try_from(n).unwrap_or(i64::MAX);
+        let next = usize::try_from(active.saturating_add(i64::from(delta)).rem_euclid(n))
+            .unwrap_or(usize::MAX);
         if next == self.active {
             return false;
         }
@@ -266,7 +346,7 @@ impl Dashboard {
                 url: rt.url,
                 client: rt.client,
                 sources: rt.sources,
-                store: LocalStateStore::from_path(path),
+                store: Some(LocalStateStore::from_path(path)),
             });
             self.metas.len() - 1
         };
@@ -291,11 +371,13 @@ fn load_state_for(
     active: usize,
     notifications_enabled: bool,
 ) -> AppState {
-    let mut state = match meta
-        .store
-        .load_state::<crate::cache::CachedDashboardState>()
-    {
-        Ok(Some(cached)) if cache::cache_identity(&cached.instance_url) == cache::cache_identity(&meta.url) => {
+    let cached = meta.store.as_ref().map_or(Ok(None), |store| {
+        store.load_state::<crate::cache::CachedDashboardState>()
+    });
+    let mut state = match cached {
+        Ok(Some(cached))
+            if cache::cache_identity(&cached.instance_url) == cache::cache_identity(&meta.url) =>
+        {
             AppState::from_cached(meta.sources.clone(), cached)
         }
         Ok(Some(_)) => {
@@ -405,7 +487,8 @@ enum AppEvent {
         generation: u64,
         project_id: u64,
         pipeline_id: u64,
-        result: std::result::Result<(gitlab::Pipeline, Vec<gitlab::Job>, Vec<gitlab::Bridge>), String>,
+        result:
+            std::result::Result<(gitlab::Pipeline, Vec<gitlab::Job>, Vec<gitlab::Bridge>), String>,
     },
     TagsLoaded {
         instance: usize,
@@ -504,8 +587,12 @@ pub async fn run_dashboard(
             Outcome::Quit => return Ok(()),
             Outcome::AddInstance => {
                 add_instances_via_wizard(&mut dashboard).await?;
-                dashboard.state = load_state_for(&dashboard.metas[dashboard.active], &dashboard.labels,
-                    dashboard.active, dashboard.notifications_enabled);
+                dashboard.state = load_state_for(
+                    &dashboard.metas[dashboard.active],
+                    &dashboard.labels,
+                    dashboard.active,
+                    dashboard.notifications_enabled,
+                );
             }
         }
     }
@@ -549,8 +636,8 @@ async fn run_loop(
     let stop = Arc::new(AtomicBool::new(false));
     let reader = spawn_event_reader(tx.clone(), stop.clone(), AppEvent::Input);
     dashboard.start_full_refresh(&tx);
-    spawn_auto_refresh_tick(tx.clone());
-    spawn_ui_tick(tx.clone());
+    spawn_tick(tx.clone(), AUTO_REFRESH_INTERVAL, AppEvent::AutoRefreshTick);
+    spawn_tick(tx.clone(), UI_TICK_INTERVAL, AppEvent::UiTick);
 
     let outcome = loop {
         let active = dashboard.instance_generation;
@@ -569,11 +656,26 @@ async fn run_loop(
         // catches every loading source). The chain keeps itself alive until nothing is spinning.
         if dashboard.state.is_spinning() && !dashboard.spinner_running {
             dashboard.spinner_running = true;
-            spawn_spinner_tick(tx.clone());
+            spawn_tick(tx.clone(), SPINNER_TICK_INTERVAL, AppEvent::SpinnerTick);
         }
 
-        match rx.recv().await {
-            Some(AppEvent::Input(event)) => {
+        let Some(event) = rx.recv().await else {
+            break Ok(Outcome::Quit);
+        };
+        let Some(event) = handle_refresh_event(event, dashboard, &tx) else {
+            continue;
+        };
+        let Some(event) = handle_list_event(event, dashboard) else {
+            continue;
+        };
+        let Some(event) = handle_mr_event(event, dashboard, &tx) else {
+            continue;
+        };
+        let Some(event) = handle_action_event(event, dashboard, &tx) else {
+            continue;
+        };
+        match event {
+            AppEvent::Input(event) => {
                 // Mouse hit-testing needs the screen rect the last frame was drawn into.
                 let area = terminal
                     .size()
@@ -583,56 +685,11 @@ async fn run_loop(
                     break Ok(outcome);
                 }
             }
-            Some(AppEvent::RefreshCompleted(mut report)) => {
-                if !dashboard.accept_full_refresh(&mut report) { continue; }
-                if report.is_complete_failure && dashboard.state.is_showing_cached_data() {
-                    dashboard.state.apply_cached_refresh_failure();
-                    continue;
-                }
-
-                let should_persist = report.has_usable_data();
-                let RefreshReport {
-                    snapshots,
-                    errors,
-                    is_complete_failure,
-                    group_errors,
-                    ..
-                } = report;
-
-                dashboard.state.apply_live_refresh(
-                    snapshots,
-                    errors,
-                    is_complete_failure,
-                    &group_errors,
-                );
-
-                if should_persist {
-                    dashboard.state_dirty = true;
-                }
-            }
-            Some(AppEvent::ProjectRefreshed { instance, generation, snapshot }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) { continue; }
-                let follow = dashboard.state.apply_project_refresh(*snapshot);
-                resume_log_follow(follow, &tx, instance, dashboard.active_client());
-                dashboard.state_dirty = true;
-            }
-            Some(AppEvent::ProjectAutoRefreshed { instance, generation, snapshot }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) { continue; }
-                let follow = dashboard.state.apply_project_auto_refresh(*snapshot);
-                resume_log_follow(follow, &tx, instance, dashboard.active_client());
-                dashboard.state_dirty = true;
-            }
-            Some(AppEvent::AutoRefreshTick) => {
+            AppEvent::AutoRefreshTick => {
                 refresh_active_projects(dashboard, &tx);
-                spawn_auto_refresh_tick(tx.clone());
+                spawn_tick(tx.clone(), AUTO_REFRESH_INTERVAL, AppEvent::AutoRefreshTick);
             }
-            Some(AppEvent::UiTick) => {
+            AppEvent::UiTick => {
                 // The loop redraws at the top of every iteration, which is all an optimistic timer
                 // needs. The tick also flushes at most one debounced cache write per second instead
                 // of one per project per refresh cycle. ponytail: keep the write synchronous — a
@@ -642,189 +699,35 @@ async fn run_loop(
                     persist_dashboard_state(&dashboard.state, dashboard.active_store());
                     dashboard.state_dirty = false;
                 }
-                spawn_ui_tick(tx.clone());
+                spawn_tick(tx.clone(), UI_TICK_INTERVAL, AppEvent::UiTick);
             }
-            Some(AppEvent::SpinnerTick) => {
+            AppEvent::SpinnerTick => {
                 // Keep the chain alive only while a spinner is still visible; otherwise let it stop
                 // (the redraw itself happens at the top of the loop on every iteration).
                 if dashboard.state.is_spinning() {
-                    spawn_spinner_tick(tx.clone());
+                    spawn_tick(tx.clone(), SPINNER_TICK_INTERVAL, AppEvent::SpinnerTick);
                 } else {
                     dashboard.spinner_running = false;
                 }
             }
-            Some(AppEvent::ActionCompleted(report)) => {
-                if report.instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_action_completed(report, dashboard, &tx);
+            AppEvent::RefreshCompleted(_)
+            | AppEvent::ProjectRefreshed { .. }
+            | AppEvent::ProjectAutoRefreshed { .. }
+            | AppEvent::ActionCompleted(_)
+            | AppEvent::TraceLoaded { .. }
+            | AppEvent::VariablesLoaded { .. }
+            | AppEvent::BranchesLoaded { .. }
+            | AppEvent::PipelinesLoaded { .. }
+            | AppEvent::EnvironmentsLoaded { .. }
+            | AppEvent::PipelineJobsLoaded { .. }
+            | AppEvent::TagsLoaded { .. }
+            | AppEvent::TagCreated { .. }
+            | AppEvent::MergeRequestsLoaded { .. }
+            | AppEvent::MrHeadPipelineLoaded { .. }
+            | AppEvent::ArtifactsDownloaded { .. }
+            | AppEvent::RunningScanCompleted { .. } => {
+                unreachable!("result events were handled above")
             }
-            Some(AppEvent::TraceLoaded {
-                instance,
-                project_id,
-                job_id,
-                generation,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_trace_loaded(project_id, job_id, generation, result, dashboard, &tx);
-            }
-            Some(AppEvent::VariablesLoaded {
-                instance,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_variables_loaded(project_id, result, &mut dashboard.state);
-            }
-            Some(AppEvent::BranchesLoaded {
-                instance,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                dashboard.state.apply_branches_loaded(project_id, result);
-            }
-            Some(AppEvent::PipelinesLoaded {
-                instance,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_pipelines_loaded(project_id, result, &mut dashboard.state);
-            }
-            Some(AppEvent::EnvironmentsLoaded {
-                instance,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_environments_loaded(project_id, result, &mut dashboard.state);
-            }
-            Some(AppEvent::PipelineJobsLoaded {
-                instance,
-                generation,
-                project_id,
-                pipeline_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                if !dashboard.finish_project_request((project_id, pipeline_id), generation) { continue; }
-                let follow = handle_pipeline_jobs_loaded(project_id, pipeline_id, result, &mut dashboard.state);
-                resume_log_follow(follow, &tx, instance, dashboard.active_client());
-            }
-            Some(AppEvent::TagsLoaded {
-                instance,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_tags_loaded(project_id, result, &mut dashboard.state);
-            }
-            Some(AppEvent::TagCreated {
-                instance,
-                project_id,
-                tag_name,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                if handle_tag_created(project_id, tag_name, result, &mut dashboard.state) {
-                    // Load the tag's pipeline (and its jobs) into the detail panel. GitLab often
-                    // registers the tag-triggered pipeline a moment after the tag, so fetch now and
-                    // again after a short delay to catch it.
-                    spawn_project_refresh(dashboard, &tx, project_id, Duration::ZERO);
-                    spawn_project_refresh(dashboard, &tx, project_id, TAG_PIPELINE_RETRY_DELAY);
-                }
-            }
-            Some(AppEvent::MergeRequestsLoaded {
-                instance,
-                generation,
-                scope,
-                project_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_merge_requests_loaded(scope, generation, project_id, result, &mut dashboard.state);
-                // Kick off the head-pipeline fetch for the initially selected row.
-                for command in input::request_selected_head_pipeline(&mut dashboard.state) {
-                    if let Command::FetchMrHeadPipeline { project_id, iid } = command {
-                        spawn_mr_head_pipeline_fetch(
-                            tx.clone(),
-                            dashboard.instance_generation,
-                            dashboard.active_client().clone(),
-                            project_id,
-                            iid,
-                            dashboard.state.mr_panel.generation,
-                        );
-                    }
-                }
-            }
-            Some(AppEvent::MrHeadPipelineLoaded {
-                instance,
-                generation,
-                project_id,
-                iid,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                if generation != dashboard.state.mr_panel.generation { continue; }
-                let slot = match result {
-                    Ok(pipeline) => state::HeadPipelineSlot::Loaded(pipeline),
-                    Err(err) => state::HeadPipelineSlot::Failed(err),
-                };
-                dashboard
-                    .state
-                    .mr_panel
-                    .head_pipelines
-                    .insert((project_id, iid), slot);
-            }
-            Some(AppEvent::ArtifactsDownloaded {
-                instance,
-                project_id,
-                job_id,
-                result,
-            }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                let state = &mut dashboard.state;
-                state.in_flight.remove(&(project_id, job_id));
-                state.status_message = match result {
-                    Ok((path, written)) => format!(
-                        "Artifacts saved to {} ({:.1} MB)",
-                        path.display(),
-                        written as f64 / 1_048_576.0
-                    ),
-                    Err(err) => format!("Artifacts download failed: {err}"),
-                };
-            }
-            Some(AppEvent::RunningScanCompleted { instance, hits }) => {
-                if instance != dashboard.instance_generation {
-                    continue;
-                }
-                handle_running_scan_completed(hits, dashboard, &tx);
-            }
-            None => break Ok(Outcome::Quit),
         }
     };
 
@@ -844,28 +747,328 @@ async fn run_loop(
     outcome
 }
 
-/// Schedules the next auto-refresh tick. Self-rescheduling (the run loop re-arms it on receipt),
-/// so the timer runs for the whole session and only fans out work when a pipeline is in flight.
-fn spawn_auto_refresh_tick(tx: mpsc::Sender<AppEvent>) {
-    tokio::spawn(async move {
-        tokio::time::sleep(AUTO_REFRESH_INTERVAL).await;
-        let _ = tx.send(AppEvent::AutoRefreshTick).await;
-    });
+/// Applies full, project and viewed-pipeline refresh results.
+/// Returns events outside this group for further dispatch.
+fn handle_refresh_event(
+    event: AppEvent,
+    dashboard: &mut Dashboard,
+    tx: &mpsc::Sender<AppEvent>,
+) -> Option<AppEvent> {
+    match event {
+        AppEvent::RefreshCompleted(mut report) => {
+            if !dashboard.accept_full_refresh(&mut report) {
+                return None;
+            }
+            if report.is_complete_failure && dashboard.state.is_showing_cached_data() {
+                dashboard.state.apply_cached_refresh_failure();
+                return None;
+            }
+
+            let should_persist = report.has_usable_data();
+            let RefreshReport {
+                snapshots,
+                errors,
+                is_complete_failure,
+                group_errors,
+                ..
+            } = report;
+
+            dashboard.state.apply_live_refresh(
+                snapshots,
+                errors,
+                is_complete_failure,
+                &group_errors,
+            );
+
+            if should_persist {
+                dashboard.state_dirty = true;
+            }
+        }
+        AppEvent::ProjectRefreshed {
+            instance,
+            generation,
+            snapshot,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) {
+                return None;
+            }
+            let follow = dashboard.state.apply_project_refresh(*snapshot);
+            resume_log_follow(follow, tx, instance, dashboard.active_client());
+            dashboard.state_dirty = true;
+        }
+        AppEvent::ProjectAutoRefreshed {
+            instance,
+            generation,
+            snapshot,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) {
+                return None;
+            }
+            let follow = dashboard.state.apply_project_auto_refresh(*snapshot);
+            resume_log_follow(follow, tx, instance, dashboard.active_client());
+            dashboard.state_dirty = true;
+        }
+        AppEvent::PipelineJobsLoaded {
+            instance,
+            generation,
+            project_id,
+            pipeline_id,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            if !dashboard.finish_project_request((project_id, pipeline_id), generation) {
+                return None;
+            }
+            let follow =
+                handle_pipeline_jobs_loaded(project_id, pipeline_id, result, &mut dashboard.state);
+            resume_log_follow(follow, tx, instance, dashboard.active_client());
+        }
+        event => return Some(event),
+    }
+    None
 }
 
-/// Schedules the next UI redraw tick. Self-rescheduling, like [`spawn_auto_refresh_tick`], but it
-/// only wakes the loop to redraw (advancing optimistic timers) — it never touches the network.
-fn spawn_ui_tick(tx: mpsc::Sender<AppEvent>) {
-    tokio::spawn(async move {
-        tokio::time::sleep(UI_TICK_INTERVAL).await;
-        let _ = tx.send(AppEvent::UiTick).await;
-    });
+/// Applies fetched project lists to their current views.
+/// Returns events outside this group for further dispatch.
+fn handle_list_event(event: AppEvent, dashboard: &mut Dashboard) -> Option<AppEvent> {
+    match event {
+        AppEvent::VariablesLoaded {
+            instance,
+            project_id,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            handle_variables_loaded(project_id, result, &mut dashboard.state);
+        }
+        AppEvent::BranchesLoaded {
+            instance,
+            project_id,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            dashboard.state.apply_branches_loaded(project_id, result);
+        }
+        AppEvent::PipelinesLoaded {
+            instance,
+            project_id,
+            result,
+        } => {
+            let Overlay::Pipelines(view) = &mut dashboard.state.overlay else {
+                return None;
+            };
+            if instance == dashboard.instance_generation && view.project_id == project_id {
+                let list = (
+                    &mut view.loading,
+                    &mut view.pipelines,
+                    &mut view.selected,
+                    &mut view.error,
+                );
+                apply_list_result(result, list);
+            }
+        }
+        AppEvent::EnvironmentsLoaded {
+            instance,
+            project_id,
+            result,
+        } => {
+            let Overlay::Environments(view) = &mut dashboard.state.overlay else {
+                return None;
+            };
+            if instance == dashboard.instance_generation && view.project_id == project_id {
+                let list = (
+                    &mut view.loading,
+                    &mut view.environments,
+                    &mut view.selected,
+                    &mut view.error,
+                );
+                apply_list_result(result, list);
+            }
+        }
+        AppEvent::TagsLoaded {
+            instance,
+            project_id,
+            result,
+        } => {
+            let Overlay::Tags(view) = &mut dashboard.state.overlay else {
+                return None;
+            };
+            if instance == dashboard.instance_generation && view.project_id == project_id {
+                let list = (
+                    &mut view.loading,
+                    &mut view.tags,
+                    &mut view.selected,
+                    &mut view.error,
+                );
+                apply_list_result(result, list);
+            }
+        }
+        event => return Some(event),
+    }
+    None
 }
 
-fn spawn_spinner_tick(tx: mpsc::Sender<AppEvent>) {
+/// Applies merge-request lists and head pipelines.
+/// Returns events outside this group for further dispatch.
+fn handle_mr_event(
+    event: AppEvent,
+    dashboard: &mut Dashboard,
+    tx: &mpsc::Sender<AppEvent>,
+) -> Option<AppEvent> {
+    match event {
+        AppEvent::MergeRequestsLoaded {
+            instance,
+            generation,
+            scope,
+            project_id,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            handle_merge_requests_loaded(
+                scope,
+                generation,
+                project_id,
+                result,
+                &mut dashboard.state,
+            );
+            // Kick off the head-pipeline fetch for the initially selected row.
+            for command in input::request_selected_head_pipeline(&mut dashboard.state) {
+                if let Command::FetchMrHeadPipeline { project_id, iid } = command {
+                    spawn_mr_head_pipeline_fetch(
+                        tx.clone(),
+                        dashboard.instance_generation,
+                        dashboard.active_client().clone(),
+                        project_id,
+                        iid,
+                        dashboard.state.mr_panel.generation,
+                    );
+                }
+            }
+        }
+        AppEvent::MrHeadPipelineLoaded {
+            instance,
+            generation,
+            project_id,
+            iid,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            if generation != dashboard.state.mr_panel.generation {
+                return None;
+            }
+            let slot = match result {
+                Ok(pipeline) => state::HeadPipelineSlot::Loaded(pipeline),
+                Err(err) => state::HeadPipelineSlot::Failed(err),
+            };
+            dashboard
+                .state
+                .mr_panel
+                .head_pipelines
+                .insert((project_id, iid), slot);
+        }
+        event => return Some(event),
+    }
+    None
+}
+
+/// Applies action, trace, tag, download and running-scan results.
+/// Returns events outside this group for further dispatch.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Downloaded byte counts are only displayed to one decimal place in MB"
+)]
+fn handle_action_event(
+    event: AppEvent,
+    dashboard: &mut Dashboard,
+    tx: &mpsc::Sender<AppEvent>,
+) -> Option<AppEvent> {
+    match event {
+        AppEvent::ActionCompleted(report) => {
+            if report.instance != dashboard.instance_generation {
+                return None;
+            }
+            handle_action_completed(report, dashboard, tx);
+        }
+        AppEvent::TraceLoaded {
+            instance,
+            project_id,
+            job_id,
+            generation,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            handle_trace_loaded(project_id, job_id, generation, result, dashboard, tx);
+        }
+        AppEvent::TagCreated {
+            instance,
+            project_id,
+            tag_name,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            if handle_tag_created(project_id, tag_name, result, &mut dashboard.state) {
+                // Load the tag's pipeline (and its jobs) into the detail panel. GitLab often
+                // registers the tag-triggered pipeline a moment after the tag, so fetch now and
+                // again after a short delay to catch it.
+                spawn_project_refresh(dashboard, tx, project_id, Duration::ZERO);
+                spawn_project_refresh(dashboard, tx, project_id, TAG_PIPELINE_RETRY_DELAY);
+            }
+        }
+        AppEvent::ArtifactsDownloaded {
+            instance,
+            project_id,
+            job_id,
+            result,
+        } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            let state = &mut dashboard.state;
+            state.in_flight.remove(&(project_id, job_id));
+            state.status_message = match result {
+                Ok((path, written)) => format!(
+                    "Artifacts saved to {} ({:.1} MB)",
+                    path.display(),
+                    written as f64 / 1_048_576.0
+                ),
+                Err(err) => format!("Artifacts download failed: {err}"),
+            };
+        }
+        AppEvent::RunningScanCompleted { instance, hits } => {
+            if instance != dashboard.instance_generation {
+                return None;
+            }
+            handle_running_scan_completed(hits, dashboard, tx);
+        }
+        event => return Some(event),
+    }
+    None
+}
+
+/// Schedules one tick; the run loop re-arms it on receipt while needed.
+fn spawn_tick(tx: mpsc::Sender<AppEvent>, delay: Duration, event: AppEvent) {
     tokio::spawn(async move {
-        tokio::time::sleep(SPINNER_TICK_INTERVAL).await;
-        let _ = tx.send(AppEvent::SpinnerTick).await;
+        tokio::time::sleep(delay).await;
+        let _ = tx.send(event).await;
     });
 }
 
@@ -873,26 +1076,66 @@ fn spawn_spinner_tick(tx: mpsc::Sender<AppEvent>) {
 /// statuses keep advancing. Silent (no "Refreshing…" flash) and per-project — idle projects cost
 /// nothing. Projects already awaiting an action-driven refresh are skipped to avoid double fetches.
 fn refresh_active_projects(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>) {
-    if dashboard.full_refresh.is_some() { return; }
+    if dashboard.full_refresh.is_some() {
+        return;
+    }
     for project_id in dashboard.state.active_project_ids() {
         let key = (project_id, 0);
-        if dashboard.refreshes.get(&key).is_some_and(|request| request.task.is_some()) { continue; }
-        if let Some(item) = dashboard.state.items.iter().find(|item| item.configured.id == project_id) {
+        if dashboard
+            .refreshes
+            .get(&key)
+            .is_some_and(|request| request.task.is_some())
+        {
+            continue;
+        }
+        if let Some(item) = dashboard
+            .state
+            .items
+            .iter()
+            .find(|item| item.configured.id == project_id)
+        {
             let configured = item.configured.clone();
             let origin = item.origin;
             let ref_override = dashboard.state.ref_overrides.get(&project_id).cloned();
             let generation = dashboard.start_project_request(key);
-            let task = spawn_refresh_one_auto(tx.clone(), dashboard.instance_generation, generation,
-                dashboard.active_client().clone(), configured, origin, ref_override);
-            dashboard.refreshes.insert(key, PendingRefresh { generation, clears_pending: false, task: Some(task.abort_handle()) });
+            let task = spawn_refresh_one_auto(
+                tx.clone(),
+                dashboard.instance_generation,
+                generation,
+                dashboard.active_client().clone(),
+                configured,
+                origin,
+                ref_override,
+            );
+            dashboard.refreshes.insert(
+                key,
+                PendingRefresh {
+                    generation,
+                    clears_pending: false,
+                    task: Some(task.abort_handle()),
+                },
+            );
         }
     }
-    let views: Vec<_> = dashboard.state.viewed_pipeline.iter()
-        .filter(|(_, view)| view.pipeline.status.is_active() && !view.loading
-            && !dashboard.state.pending_actions.contains(&view.project_id))
-        .map(|(&id, view)| (id, view.project_id, view.pipeline.id)).collect();
+    let views: Vec<_> = dashboard
+        .state
+        .viewed_pipeline
+        .iter()
+        .filter(|(_, view)| {
+            view.pipeline.status.is_active()
+                && !view.loading
+                && !dashboard.state.pending_actions.contains(&view.project_id)
+        })
+        .map(|(&id, view)| (id, view.project_id, view.pipeline.id))
+        .collect();
     for (id, project_id, pipeline_id) in views {
-        if dashboard.refreshes.get(&(id, pipeline_id)).is_some_and(|request| request.task.is_some()) { continue; }
+        if dashboard
+            .refreshes
+            .get(&(id, pipeline_id))
+            .is_some_and(|request| request.task.is_some())
+        {
+            continue;
+        }
         dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id);
     }
 }
@@ -975,19 +1218,32 @@ fn handle_action_completed(
     match report.result {
         Ok(()) => {
             state.status_message = format!("{}: requested", report.action.describe());
-            let views: Vec<_> = state.viewed_pipeline.iter()
+            let views: Vec<_> = state
+                .viewed_pipeline
+                .iter()
                 .filter(|(_, view)| view.project_id == project_id)
-                .map(|(&id, view)| (id, view.pipeline.id)).collect();
+                .map(|(&id, view)| (id, view.pipeline.id))
+                .collect();
             for &(id, pipeline_id) in &views {
-                if let Some(view) = dashboard.state.viewed_pipeline.get_mut(&id) { view.loading = true; }
+                if let Some(view) = dashboard.state.viewed_pipeline.get_mut(&id) {
+                    view.loading = true;
+                }
                 dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id);
             }
             if views.is_empty() {
-                if dashboard.state.items.iter().any(|item| item.configured.id == project_id) {
+                if dashboard
+                    .state
+                    .items
+                    .iter()
+                    .any(|item| item.configured.id == project_id)
+                {
                     spawn_project_refresh(dashboard, tx, project_id, Duration::ZERO);
                 } else {
                     dashboard.state.pending_actions.remove(&project_id);
-                    dashboard.state.in_flight.retain(|(pid, _)| *pid != project_id);
+                    dashboard
+                        .state
+                        .in_flight
+                        .retain(|(pid, _)| *pid != project_id);
                 }
             }
         }
@@ -1108,70 +1364,27 @@ fn handle_merge_requests_loaded(
     }
 }
 
-/// Delivers a finished environments fetch into the overlay, if it's still open for that project.
-fn handle_environments_loaded(
-    project_id: u64,
-    result: std::result::Result<Vec<gitlab::Environment>, String>,
-    state: &mut AppState,
-) {
-    let Overlay::Environments(view) = &mut state.overlay else {
-        return;
-    };
-    if view.project_id != project_id {
-        return;
-    }
-    view.loading = false;
-    match result {
-        Ok(environments) => {
-            view.environments = environments;
-            view.selected = 0;
-            view.error = None;
-        }
-        Err(err) => view.error = Some(err),
-    }
-}
+/// A list overlay's fetch state: `(loading, items, selected, error)`.
+type ListFields<'a, T> = (
+    &'a mut bool,
+    &'a mut Vec<T>,
+    &'a mut usize,
+    &'a mut Option<String>,
+);
 
-fn handle_pipelines_loaded(
-    project_id: u64,
-    result: std::result::Result<Vec<gitlab::Pipeline>, String>,
-    state: &mut AppState,
+/// Delivers a finished list fetch: fresh rows reset the cursor; an error keeps the previous rows.
+fn apply_list_result<T>(
+    result: std::result::Result<Vec<T>, String>,
+    (loading, items, selected, error): ListFields<'_, T>,
 ) {
-    let Overlay::Pipelines(view) = &mut state.overlay else {
-        return;
-    };
-    if view.project_id != project_id {
-        return;
-    }
-    view.loading = false;
+    *loading = false;
     match result {
-        Ok(pipelines) => {
-            view.pipelines = pipelines;
-            view.selected = 0;
-            view.error = None;
+        Ok(loaded) => {
+            *items = loaded;
+            *selected = 0;
+            *error = None;
         }
-        Err(err) => view.error = Some(err),
-    }
-}
-
-fn handle_tags_loaded(
-    project_id: u64,
-    result: std::result::Result<Vec<gitlab::Tag>, String>,
-    state: &mut AppState,
-) {
-    let Overlay::Tags(view) = &mut state.overlay else {
-        return;
-    };
-    if view.project_id != project_id {
-        return;
-    }
-    view.loading = false;
-    match result {
-        Ok(tags) => {
-            view.tags = tags;
-            view.selected = 0;
-            view.error = None;
-        }
-        Err(err) => view.error = Some(err),
+        Err(err) => *error = Some(err),
     }
 }
 
@@ -1239,7 +1452,14 @@ fn spawn_project_refresh(
             ref_override,
             delay,
         );
-        dashboard.refreshes.insert(key, PendingRefresh { generation, clears_pending: true, task: Some(task.abort_handle()) });
+        dashboard.refreshes.insert(
+            key,
+            PendingRefresh {
+                generation,
+                clears_pending: true,
+                task: Some(task.abort_handle()),
+            },
+        );
     }
 }
 
@@ -1291,7 +1511,9 @@ fn handle_pipeline_jobs_loaded(
     }
     let pipeline_project_id = view.project_id;
     state.pending_actions.remove(&pipeline_project_id);
-    state.in_flight.retain(|(pid, _)| *pid != pipeline_project_id);
+    state
+        .in_flight
+        .retain(|(pid, _)| *pid != pipeline_project_id);
     // Clamp the job cursor to the freshly loaded list.
     state.ensure_selection();
     state.sync_open_log_with_snapshot(pipeline_project_id)
@@ -1333,168 +1555,156 @@ fn handle_input(
     }
 
     for command in commands {
-        match command {
-            Command::Quit => return Some(Outcome::Quit),
-            Command::AddInstance => return Some(Outcome::AddInstance),
-            Command::SwitchInstance { delta } => {
-                if dashboard.switch(delta) { dashboard.start_full_refresh(tx); }
-            }
-            Command::Refresh => {
-                dashboard.state.mr_panel.reset();
-                for command in input::focus_mr_refresh(&mut dashboard.state) {
-                    if let Command::FetchMergeRequests { scope, project_id } = command {
-                        spawn_merge_requests_fetch(tx.clone(), dashboard.instance_generation,
-                            dashboard.active_client().clone(), project_id, scope, dashboard.state.mr_panel.generation);
-                    }
-                }
-                dashboard.start_full_refresh(tx);
-            }
-            Command::RefreshProject { project_id } => {
-                spawn_project_refresh(dashboard, tx, project_id, Duration::ZERO);
-            }
-            Command::ScanRunning => {
-                let project_ids: Vec<u64> = dashboard
-                    .state
-                    .items
-                    .iter()
-                    .map(|item| item.configured.id)
-                    .collect();
-                if project_ids.is_empty() {
-                    dashboard.state.status_message = String::from("No projects to scan");
-                } else {
-                    dashboard.state.status_message = String::from("Scanning for running pipelines…");
-                    spawn_running_scan(
-                        tx.clone(),
-                        dashboard.instance_generation,
-                        dashboard.active_client().clone(),
-                        project_ids,
-                    );
-                }
-            }
-            Command::Dispatch(action) => {
-                spawn_action(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    action,
-                );
-            }
-            Command::FetchTrace {
-                project_id,
-                job_id,
-                generation,
-            } => {
-                spawn_trace_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    job_id,
-                    generation,
-                    None,
-                );
-            }
-            Command::FetchVariables { project_id } => {
-                spawn_variables_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                );
-            }
-            Command::FetchPipelines { project_id, ref_ } => {
-                spawn_pipelines_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    ref_,
-                );
-            }
-            Command::FetchEnvironments { project_id } => {
-                spawn_environments_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                );
-            }
-            Command::FetchTags { project_id } => {
-                spawn_tags_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                );
-            }
-            Command::CreateTag {
-                project_id,
-                tag_name,
-                ref_,
-                message,
-            } => {
-                spawn_tag_create(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    tag_name,
-                    ref_,
-                    message,
-                );
-            }
-            Command::FetchMergeRequests { scope, project_id } => {
-                spawn_merge_requests_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    scope,
-                    dashboard.state.mr_panel.generation,
-                );
-            }
-            Command::FetchMrHeadPipeline { project_id, iid } => {
-                spawn_mr_head_pipeline_fetch(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    iid,
-                    dashboard.state.mr_panel.generation,
-                );
-            }
-            Command::FetchPipelineJobs {
-                project_id,
-                pipeline_project_id,
-                pipeline_id,
-            } => {
-                dashboard.fetch_viewed_pipeline(tx, project_id, pipeline_project_id, pipeline_id);
-            }
-            Command::DownloadArtifacts {
-                project_id,
-                job_id,
-                job_name,
-                filename,
-            } => {
-                spawn_artifacts_download(
-                    tx.clone(),
-                    dashboard.instance_generation,
-                    dashboard.active_client().clone(),
-                    project_id,
-                    job_id,
-                    job_name,
-                    filename,
-                );
-            }
-            Command::CopyToClipboard { value } => {
-                copy_to_clipboard(&value);
-            }
-            Command::OpenUrl { url } => {
-                open_url(&url);
-            }
+        if let Some(outcome) = handle_command(command, dashboard, tx) {
+            return Some(outcome);
         }
     }
     None
+}
+
+/// Executes one input command, returning an outcome when the dashboard should stop.
+fn handle_command(
+    command: Command,
+    dashboard: &mut Dashboard,
+    tx: &mpsc::Sender<AppEvent>,
+) -> Option<Outcome> {
+    if dashboard.active_client().is_demo() && demo::simulate_command(&command, &mut dashboard.state)
+    {
+        return None;
+    }
+    let instance = dashboard.instance_generation;
+    let client = dashboard.active_client();
+    match command {
+        Command::Quit => return Some(Outcome::Quit),
+        Command::AddInstance => return Some(Outcome::AddInstance),
+        Command::SwitchInstance { delta } => {
+            if dashboard.switch(delta) {
+                dashboard.start_full_refresh(tx);
+            }
+        }
+        Command::Refresh => refresh_dashboard(dashboard, tx),
+        Command::RefreshProject { project_id } => {
+            spawn_project_refresh(dashboard, tx, project_id, Duration::ZERO)
+        }
+        Command::ScanRunning => scan_running_pipelines(dashboard, tx),
+        Command::Dispatch(action) => spawn_action(tx.clone(), instance, client.clone(), action),
+        Command::FetchTrace {
+            project_id,
+            job_id,
+            generation,
+        } => spawn_trace_fetch(
+            tx.clone(),
+            instance,
+            client.clone(),
+            project_id,
+            job_id,
+            generation,
+            None,
+        ),
+        Command::FetchVariables { project_id } => {
+            spawn_variables_fetch(tx.clone(), instance, client.clone(), project_id)
+        }
+        Command::FetchPipelines { project_id, ref_ } => {
+            spawn_pipelines_fetch(tx.clone(), instance, client.clone(), project_id, ref_)
+        }
+        Command::FetchEnvironments { project_id } => {
+            spawn_environments_fetch(tx.clone(), instance, client.clone(), project_id)
+        }
+        Command::FetchTags { project_id } => {
+            spawn_tags_fetch(tx.clone(), instance, client.clone(), project_id)
+        }
+        Command::CreateTag {
+            project_id,
+            tag_name,
+            ref_,
+            message,
+        } => spawn_tag_create(
+            tx.clone(),
+            instance,
+            client.clone(),
+            project_id,
+            tag_name,
+            ref_,
+            message,
+        ),
+        Command::FetchMergeRequests { scope, project_id } => spawn_merge_requests_fetch(
+            tx.clone(),
+            instance,
+            client.clone(),
+            project_id,
+            scope,
+            dashboard.state.mr_panel.generation,
+        ),
+        Command::FetchMrHeadPipeline { project_id, iid } => spawn_mr_head_pipeline_fetch(
+            tx.clone(),
+            instance,
+            client.clone(),
+            project_id,
+            iid,
+            dashboard.state.mr_panel.generation,
+        ),
+        Command::FetchPipelineJobs {
+            project_id,
+            pipeline_project_id,
+            pipeline_id,
+        } => dashboard.fetch_viewed_pipeline(tx, project_id, pipeline_project_id, pipeline_id),
+        Command::DownloadArtifacts {
+            project_id,
+            job_id,
+            job_name,
+            filename,
+        } => spawn_artifacts_download(
+            tx.clone(),
+            instance,
+            client.clone(),
+            project_id,
+            job_id,
+            job_name,
+            filename,
+        ),
+        Command::CopyToClipboard { value } => copy_to_clipboard(&value),
+        Command::OpenUrl { url } => open_url(&url),
+    }
+    None
+}
+
+/// Refreshes the MR panel and the active dashboard.
+fn refresh_dashboard(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>) {
+    dashboard.state.mr_panel.reset();
+    for command in input::focus_mr_refresh(&mut dashboard.state) {
+        if let Command::FetchMergeRequests { scope, project_id } = command {
+            spawn_merge_requests_fetch(
+                tx.clone(),
+                dashboard.instance_generation,
+                dashboard.active_client().clone(),
+                project_id,
+                scope,
+                dashboard.state.mr_panel.generation,
+            );
+        }
+    }
+    dashboard.start_full_refresh(tx);
+}
+
+/// Scans the dashboard projects for running pipelines.
+fn scan_running_pipelines(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>) {
+    let project_ids: Vec<u64> = dashboard
+        .state
+        .items
+        .iter()
+        .map(|item| item.configured.id)
+        .collect();
+    if project_ids.is_empty() {
+        dashboard.state.status_message = String::from("No projects to scan");
+    } else {
+        dashboard.state.status_message = String::from("Scanning for running pipelines…");
+        spawn_running_scan(
+            tx.clone(),
+            dashboard.instance_generation,
+            dashboard.active_client().clone(),
+            project_ids,
+        );
+    }
 }
 
 /// Opens `url` in the system default browser without blocking or leaking child output into the TUI.
@@ -1629,7 +1839,8 @@ fn log_select_extend(state: &mut AppState, term_area: Rect, point: Position) {
     // below the pane the line falls outside → move_cursor_to scrolls just enough to follow it.
     let height = usize::from(body.height);
     let rel = i64::from(point.y) - i64::from(body.y);
-    let target = (offset as i64 + rel).max(0) as usize;
+    let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+    let target = usize::try_from(offset.saturating_add(rel).max(0)).unwrap_or(usize::MAX);
     if let Some(view) = state.log.as_mut() {
         // Mouse events don't update viewport_height (only key events do); refresh it so the edge
         // detection matches the rendered pane.
@@ -1643,37 +1854,19 @@ fn log_select_extend(state: &mut AppState, term_area: Rect, point: Position) {
 fn handle_scroll(down: bool, state: &mut AppState, term_area: Rect, point: Position) {
     match &mut state.overlay {
         Overlay::Variables(view) => {
-            if down {
-                if view.selected + 1 < view.matching().len() {
-                    view.selected += 1;
-                    view.revealed = false;
-                    view.notice = None;
-                }
-            } else if view.selected > 0 {
-                view.selected -= 1;
+            let len = view.matching().len();
+            if step(&mut view.selected, len, down) {
                 view.revealed = false;
                 view.notice = None;
             }
             return;
         }
         Overlay::Pipelines(view) => {
-            if down {
-                if view.selected + 1 < view.pipelines.len() {
-                    view.selected += 1;
-                }
-            } else if view.selected > 0 {
-                view.selected -= 1;
-            }
+            step(&mut view.selected, view.pipelines.len(), down);
             return;
         }
         Overlay::Environments(view) => {
-            if down {
-                if view.selected + 1 < view.environments.len() {
-                    view.selected += 1;
-                }
-            } else if view.selected > 0 {
-                view.selected -= 1;
-            }
+            step(&mut view.selected, view.environments.len(), down);
             return;
         }
         Overlay::VariableValue(view) => {
@@ -1695,13 +1888,7 @@ fn handle_scroll(down: bool, state: &mut AppState, term_area: Rect, point: Posit
     } else if areas.merge_requests.contains(point) {
         // Selection only; the head-pipeline fetch stays keyboard/click-driven.
         let panel = &mut state.mr_panel;
-        if down {
-            if panel.selected + 1 < panel.mrs.len() {
-                panel.selected += 1;
-            }
-        } else if panel.selected > 0 {
-            panel.selected -= 1;
-        }
+        step(&mut panel.selected, panel.mrs.len(), down);
     } else if areas.projects.contains(point) {
         if down {
             state.select_next_project();
@@ -1762,12 +1949,12 @@ fn handle_click(state: &mut AppState, term_area: Rect, point: Position) -> Vec<C
             // A double-click opens the selected tag's detail view, as Enter would.
             return activate_if(state, double && hit.is_some());
         }
-        // The value window consumes its clicks in `value_select_start` before reaching here.
-        Overlay::VariableValue(_) => return Vec::new(),
-        // Environments is scroll/keyboard-only; swallow clicks like the other modal overlays.
-        Overlay::Environments(_) => return Vec::new(),
-        // ActionMenu is keyboard-only for now.
-        Overlay::Help | Overlay::Confirm(_) | Overlay::ActionMenu(_) => return Vec::new(),
+        // Value selection was handled earlier; the other modal overlays are keyboard-only.
+        Overlay::VariableValue(_)
+        | Overlay::Environments(_)
+        | Overlay::Help
+        | Overlay::Confirm(_)
+        | Overlay::ActionMenu(_) => return Vec::new(),
         Overlay::None => {}
     }
 
@@ -1891,9 +2078,9 @@ fn base64_encode(input: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let b0 = u32::from(chunk[0]);
+        let b1 = u32::from(chunk.get(1).copied().unwrap_or(0));
+        let b2 = u32::from(chunk.get(2).copied().unwrap_or(0));
         let triple = (b0 << 16) | (b1 << 8) | b2;
         out.push(ALPHABET[(triple >> 18 & 0x3f) as usize] as char);
         out.push(ALPHABET[(triple >> 12 & 0x3f) as usize] as char);
@@ -1947,7 +2134,10 @@ pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>
     Ok(())
 }
 
-fn persist_dashboard_state(state: &AppState, local_state_store: &LocalStateStore) {
+fn persist_dashboard_state(state: &AppState, local_state_store: Option<&LocalStateStore>) {
+    let Some(local_state_store) = local_state_store else {
+        return;
+    };
     if let Err(err) = local_state_store.save_state(&state.to_cached_state_ref()) {
         warn!("failed to save cached dashboard state: {err}");
     }
@@ -1957,6 +2147,32 @@ fn persist_dashboard_state(state: &AppState, local_state_store: &LocalStateStore
 mod tests {
     use super::{base64_encode, hit_row, is_browser_safe_url};
     use ratatui::layout::{Position, Rect};
+
+    #[test]
+    fn list_results_reset_on_success_and_preserve_items_on_error() {
+        let mut loading = true;
+        let mut items = vec![1, 2];
+        let mut selected = 1;
+        let mut error = Some(String::from("old"));
+        super::apply_list_result(
+            Ok(vec![3, 4]),
+            (&mut loading, &mut items, &mut selected, &mut error),
+        );
+        assert!(!loading);
+        assert_eq!((&items, selected, &error), (&vec![3, 4], 0, &None));
+
+        loading = true;
+        selected = 1;
+        super::apply_list_result(
+            Err(String::from("failed")),
+            (&mut loading, &mut items, &mut selected, &mut error),
+        );
+        assert!(!loading);
+        assert_eq!(
+            (items, selected, error),
+            (vec![3, 4], 1, Some(String::from("failed")))
+        );
+    }
 
     #[test]
     fn browser_safe_url_allows_http_s_and_rejects_injection() {
@@ -2002,18 +2218,35 @@ mod tests {
     fn viewed_pipeline_refresh_keeps_context_and_updates_the_actual_project() {
         use crate::state::{AppState, ViewedPipeline};
         let mut state = AppState::new(crate::RefreshSources {
-            projects: vec![config::ProjectEntry { id: 1, name: "dashboard".into() }], groups: vec![],
+            projects: vec![config::ProjectEntry {
+                id: 1,
+                name: "dashboard".into(),
+            }],
+            groups: vec![],
         });
-        let mut pipeline: gitlab::Pipeline = serde_json::from_str(r#"{"id":500,"status":"running"}"#).expect("pipeline");
-        state.viewed_pipeline.insert(1, ViewedPipeline {
-            project_id: 8, pipeline: pipeline.clone(), jobs: vec![], bridges: vec![], loading: true, error: None,
-        });
+        let mut pipeline: gitlab::Pipeline =
+            serde_json::from_str(r#"{"id":500,"status":"running"}"#).expect("pipeline");
+        state.viewed_pipeline.insert(
+            1,
+            ViewedPipeline {
+                project_id: 8,
+                pipeline: pipeline.clone(),
+                jobs: vec![],
+                bridges: vec![],
+                loading: true,
+                error: None,
+            },
+        );
         state.pending_actions.insert(8);
         state.mark_in_flight(8, 500);
         pipeline.status = gitlab::CiStatus::Canceled;
-        let job = serde_json::from_str(r#"{"id":999,"name":"retried","status":"pending"}"#).expect("job");
+        let job =
+            serde_json::from_str(r#"{"id":999,"name":"retried","status":"pending"}"#).expect("job");
         super::handle_pipeline_jobs_loaded(1, 500, Ok((pipeline, vec![job], vec![])), &mut state);
-        let view = state.viewed_pipeline.get(&1).expect("history view stays open");
+        let view = state
+            .viewed_pipeline
+            .get(&1)
+            .expect("history view stays open");
         assert_eq!(view.project_id, 8);
         assert_eq!(view.pipeline.status, gitlab::CiStatus::Canceled);
         assert_eq!(view.jobs[0].id, 999);
@@ -2023,20 +2256,104 @@ mod tests {
 
     fn test_dashboard(cache: &std::path::Path) -> super::Dashboard {
         let sources = crate::RefreshSources {
-            projects: vec![config::ProjectEntry { id: 1, name: "project".into() }], groups: vec![],
+            projects: vec![config::ProjectEntry {
+                id: 1,
+                name: "project".into(),
+            }],
+            groups: vec![],
         };
-        let metas = (0..2).map(|index| super::InstanceMeta {
-            url: format!("https://git{index}.example"),
-            client: gitlab::GitLabClient::new(format!("https://git{index}.example"), "test", None).expect("client"),
-            sources: sources.clone(),
-            store: storage::LocalStateStore::from_path(cache.join(format!("{index}.json"))),
-        }).collect();
+        let metas = (0..2)
+            .map(|index| super::InstanceMeta {
+                url: format!("https://git{index}.example"),
+                client: gitlab::GitLabClient::new(
+                    format!("https://git{index}.example"),
+                    "test",
+                    None,
+                )
+                .expect("client"),
+                sources: sources.clone(),
+                store: Some(storage::LocalStateStore::from_path(
+                    cache.join(format!("{index}.json")),
+                )),
+            })
+            .collect();
         super::Dashboard {
-            metas, labels: vec!["first".into(), "second".into()], active: 0,
-            instance_generation: 0, request_generation: 0, completed_full_generation: 0, refreshes: Default::default(), full_refresh: None,
-            state: crate::state::AppState::new(sources), state_dirty: false,
-            notifications_enabled: false, spinner_running: false,
+            metas,
+            labels: vec!["first".into(), "second".into()],
+            active: 0,
+            instance_generation: 0,
+            request_generation: 0,
+            completed_full_generation: 0,
+            refreshes: Default::default(),
+            full_refresh: None,
+            state: crate::state::AppState::new(sources),
+            state_dirty: false,
+            notifications_enabled: false,
+            spinner_running: false,
         }
+    }
+
+    #[tokio::test]
+    async fn background_event_groups_reject_stale_results_and_pass_input_through() {
+        use super::AppEvent;
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        super::spawn_project_refresh(&mut dashboard, &tx, 1, std::time::Duration::from_secs(60));
+        let generation = dashboard.refreshes[&(1, 0)].generation;
+        let instance = dashboard.instance_generation + 1;
+        dashboard.state.mark_in_flight(1, 42);
+        let events = [
+            AppEvent::ProjectRefreshed {
+                instance,
+                generation,
+                snapshot: Box::new(dashboard.state.items[0].clone()),
+            },
+            AppEvent::ProjectAutoRefreshed {
+                instance,
+                generation,
+                snapshot: Box::new(dashboard.state.items[0].clone()),
+            },
+            AppEvent::BranchesLoaded {
+                instance,
+                project_id: 1,
+                result: Err("stale branches".into()),
+            },
+            AppEvent::MrHeadPipelineLoaded {
+                instance,
+                generation: dashboard.state.mr_panel.generation,
+                project_id: 1,
+                iid: 2,
+                result: Err("stale pipeline".into()),
+            },
+            AppEvent::ArtifactsDownloaded {
+                instance,
+                project_id: 1,
+                job_id: 42,
+                result: Err("stale download".into()),
+            },
+            AppEvent::Input(crossterm::event::Event::Resize(80, 24)),
+        ];
+        for event in events {
+            let is_input = matches!(event, AppEvent::Input(_));
+            let remaining = super::handle_refresh_event(event, &mut dashboard, &tx)
+                .and_then(|event| super::handle_list_event(event, &mut dashboard))
+                .and_then(|event| super::handle_mr_event(event, &mut dashboard, &tx))
+                .and_then(|event| super::handle_action_event(event, &mut dashboard, &tx));
+            assert_eq!(remaining.is_some(), is_input);
+            if let Some(event) = remaining {
+                assert!(matches!(
+                    event,
+                    AppEvent::Input(crossterm::event::Event::Resize(80, 24))
+                ));
+            }
+        }
+        assert!(dashboard.refreshes[&(1, 0)].task.is_some());
+        assert!(!dashboard.state_dirty);
+        assert!(dashboard.state.branches.error(1).is_none());
+        assert!(dashboard.state.mr_panel.head_pipelines.is_empty());
+        assert!(dashboard.state.is_in_flight(1, 42));
+        dashboard.stop_refreshes();
     }
 
     #[tokio::test]
@@ -2066,9 +2383,12 @@ mod tests {
     async fn slow_auto_refresh_does_not_accumulate_requests() {
         let cache = tempfile::tempdir().expect("cache");
         let mut dashboard = test_dashboard(cache.path());
-        dashboard.state.items[0].pipeline = Some(serde_json::from_str(r#"{"id":42,"status":"running"}"#).expect("pipeline"));
+        dashboard.state.items[0].pipeline =
+            Some(serde_json::from_str(r#"{"id":42,"status":"running"}"#).expect("pipeline"));
         let (tx, _rx) = tokio::sync::mpsc::channel(128);
-        for _ in 0..100 { super::refresh_active_projects(&mut dashboard, &tx); }
+        for _ in 0..100 {
+            super::refresh_active_projects(&mut dashboard, &tx);
+        }
         assert_eq!(dashboard.request_generation, 1);
         assert_eq!(dashboard.refreshes.len(), 1);
         assert!(dashboard.refreshes[&(1, 0)].task.is_some());
@@ -2085,14 +2405,30 @@ mod tests {
         dashboard.start_full_refresh(&tx);
         assert_eq!(dashboard.request_generation, generation);
         let mut report = super::RefreshReport {
-            instance: 0, generation, snapshots: dashboard.state.items.clone(),
-            errors: 0, is_complete_failure: false, group_errors: vec![],
+            instance: 0,
+            generation,
+            snapshots: dashboard.state.items.clone(),
+            errors: 0,
+            is_complete_failure: false,
+            group_errors: vec![],
         };
         dashboard.start_project_request((1, 0));
         dashboard.state.items[0].configured.name = "newer".into();
         assert!(dashboard.accept_full_refresh(&mut report));
         assert_eq!(report.snapshots[0].configured.name, "newer");
         dashboard.stop_refreshes();
+    }
+
+    #[tokio::test]
+    async fn switching_instances_handles_extreme_deltas_without_overflow() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        assert!(dashboard.switch(-1));
+        assert_eq!(dashboard.active, 1);
+        assert!(dashboard.switch(i32::MAX));
+        assert_eq!(dashboard.active, 0);
+        assert!(!dashboard.switch(i32::MIN));
+        assert_eq!(dashboard.active, 0);
     }
 
     #[tokio::test]
@@ -2105,8 +2441,12 @@ mod tests {
         assert_eq!(dashboard.active, 0);
         assert_ne!(dashboard.instance_generation, original);
         let mut report = super::RefreshReport {
-            instance: original, generation: 0, snapshots: vec![],
-            errors: 0, is_complete_failure: false, group_errors: vec![],
+            instance: original,
+            generation: 0,
+            snapshots: vec![],
+            errors: 0,
+            is_complete_failure: false,
+            group_errors: vec![],
         };
         assert!(!dashboard.accept_full_refresh(&mut report));
     }
@@ -2122,13 +2462,31 @@ mod tests {
         state.mr_panel.scope = MrScope::AssignedToMe;
         state.mr_panel.loading = true;
         let current = state.mr_panel.generation;
-        super::handle_merge_requests_loaded(MrScope::CreatedByMe, old, None, Err("old".into()), &mut state);
+        super::handle_merge_requests_loaded(
+            MrScope::CreatedByMe,
+            old,
+            None,
+            Err("old".into()),
+            &mut state,
+        );
         assert!(state.mr_panel.loading);
         assert!(state.mr_panel.error.is_none());
         state.mr_panel.scope = MrScope::CreatedByMe;
-        super::handle_merge_requests_loaded(MrScope::CreatedByMe, old, None, Err("old".into()), &mut state);
+        super::handle_merge_requests_loaded(
+            MrScope::CreatedByMe,
+            old,
+            None,
+            Err("old".into()),
+            &mut state,
+        );
         assert!(state.mr_panel.loading);
-        super::handle_merge_requests_loaded(MrScope::CreatedByMe, current, None, Err("current".into()), &mut state);
+        super::handle_merge_requests_loaded(
+            MrScope::CreatedByMe,
+            current,
+            None,
+            Err("current".into()),
+            &mut state,
+        );
         assert!(!state.mr_panel.loading);
         assert_eq!(state.mr_panel.error.as_deref(), Some("current"));
     }
@@ -2136,7 +2494,16 @@ mod tests {
     #[test]
     fn loading_mr_list_is_replaced_when_the_selected_project_changes() {
         let mut state = crate::state::AppState::new(crate::RefreshSources {
-            projects: vec![config::ProjectEntry { id: 1, name: "first".into() }, config::ProjectEntry { id: 2, name: "second".into() }],
+            projects: vec![
+                config::ProjectEntry {
+                    id: 1,
+                    name: "first".into(),
+                },
+                config::ProjectEntry {
+                    id: 2,
+                    name: "second".into(),
+                },
+            ],
             groups: vec![],
         });
         assert_eq!(crate::input::focus_mr_panel(&mut state).len(), 1);
@@ -2152,11 +2519,17 @@ mod tests {
         let cache = tempfile::tempdir().expect("cache");
         let mut dashboard = test_dashboard(cache.path());
         dashboard.state.instance_url = dashboard.metas[0].url.clone();
-        dashboard.state.ref_overrides.insert(1, "private-ref".into());
+        dashboard
+            .state
+            .ref_overrides
+            .insert(1, "private-ref".into());
         dashboard.state.items[0].configured.name = "cached".into();
-        super::persist_dashboard_state(&dashboard.state, &dashboard.metas[0].store);
+        super::persist_dashboard_state(&dashboard.state, dashboard.metas[0].store.as_ref());
         let matching = super::load_state_for(&dashboard.metas[0], &dashboard.labels, 0, false);
-        assert_eq!(matching.ref_overrides.get(&1).map(String::as_str), Some("private-ref"));
+        assert_eq!(
+            matching.ref_overrides.get(&1).map(String::as_str),
+            Some("private-ref")
+        );
         dashboard.metas[0].url = "https://another.example".into();
         let wrong = super::load_state_for(&dashboard.metas[0], &dashboard.labels, 0, false);
         assert!(wrong.ref_overrides.is_empty());
@@ -2169,7 +2542,10 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let reader = super::spawn_event_reader(tx, stop, super::AppEvent::Input);
-        tokio::time::timeout(std::time::Duration::from_secs(1), reader).await.expect("reader stopped").expect("reader joined");
+        tokio::time::timeout(std::time::Duration::from_secs(1), reader)
+            .await
+            .expect("reader stopped")
+            .expect("reader joined");
         assert!(rx.recv().await.is_none());
     }
 
@@ -2187,8 +2563,12 @@ mod tests {
         dashboard.start_full_refresh(&tx);
         assert!(dashboard.refreshes[&(1, 42)].task.is_some());
         let mut report = super::RefreshReport {
-            instance: 0, generation: dashboard.request_generation, snapshots: vec![],
-            errors: 0, is_complete_failure: false, group_errors: vec![],
+            instance: 0,
+            generation: dashboard.request_generation,
+            snapshots: vec![],
+            errors: 0,
+            is_complete_failure: false,
+            group_errors: vec![],
         };
         assert!(dashboard.accept_full_refresh(&mut report));
         assert!(!dashboard.finish_project_request((1, 0), old));
@@ -2205,5 +2585,4 @@ mod tests {
         assert!(dashboard.state.pending_actions.contains(&1));
         pending.abort();
     }
-
 }

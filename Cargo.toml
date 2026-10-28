@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.1.1"
+version = "0.2.0"
 license = "MIT"
 authors = ["Alexander Masaev <dsszs3333@gmail.com>"]
 rust-version = "1.88"
@@ -20,6 +20,14 @@ perf = { level = "deny", priority = 9 }
 redundant_clone = { level = "deny", priority = 8 }
 manual_ok_or = { level = "deny", priority = 7 }
 needless_collect = { level = "deny", priority = 6 }
+too_many_lines = "deny"
+cognitive_complexity = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_precision_loss = "deny"
+cast_possible_wrap = "deny"
+cast_lossless = "deny"
+match_same_arms = "deny"
 
 [workspace.dependencies]
 anyhow = "1"

@@ -4,7 +4,10 @@
 //! token to the keyring and the chosen sources to `projects.toml`, returning a ready client.
 
 use std::io::{self, Stdout};
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use anyhow::Result;
 use crossterm::event::{Event as CEvent, KeyEventKind};
@@ -79,7 +82,9 @@ async fn run_loop(
                     continue;
                 }
                 match state.apply_key(&key) {
-                    Some(OnboardingCommand::Cancel) => break Ok(done(completed)),
+                    Some(OnboardingCommand::Cancel | OnboardingCommand::Finish) => {
+                        break Ok(done(completed));
+                    }
                     Some(OnboardingCommand::Validate { url, token }) => {
                         state.step = Step::Validating;
                         state.error = None;
@@ -90,7 +95,6 @@ async fn run_loop(
                         state.step = Step::AddMore;
                     }
                     Some(OnboardingCommand::AddAnother) => state.reset_for_next(),
-                    Some(OnboardingCommand::Finish) => break Ok(done(completed)),
                     None => {}
                 }
             }
@@ -99,7 +103,9 @@ async fn run_loop(
                 Ok(data) => {
                     // Token is valid — persist it now so a later cancel still leaves auth set up.
                     // Key it by the instance url so multiple instances can each hold their own token.
-                    if let Err(err) = TokenStore::for_instance(state.gitlab_url()).save_token(state.token_input()) {
+                    if let Err(err) =
+                        TokenStore::for_instance(state.gitlab_url()).save_token(state.token_input())
+                    {
                         break Err(err.into());
                     }
                     state.enter_selection(&data.groups, &data.projects);

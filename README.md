@@ -1,27 +1,28 @@
 # Invocra
 
-![Invocra ritual: a pentacle on the left, two candles before the name and one after it](assets/invocra-ritual.png)
+A lazygit-style terminal dashboard for GitLab™ CI — watch pipelines across projects, read logs and retry jobs without leaving the terminal.
 
-A terminal dashboard for GitLab™ CI across projects and servers. Keep several
-projects in view, follow a different branch in each, inspect job logs and retry
-failed builds without leaving the terminal. No repository checkout needed.
+![Invocra demo showing project pipelines, branch selection, log search and a simulated job retry](assets/ci-workflow.gif)
 
-Built with the help of AI.
-
-Install with [Homebrew](#homebrew-macos-and-linux):
+Try it without a GitLab account: `invocra --demo`
 
 ```bash
 brew install dsszs3333/tap/invocra
 ```
 
+Keep several projects in view, follow a different branch in each, inspect job logs
+and retry failed builds. No repository checkout needed.
+
+Built with the help of AI.
+
 ## Demo
 
-![Invocra showing project pipelines, branch selection, log search and a confirmed job retry](assets/ci-workflow.gif)
-
-Recorded from Invocra's interactive dashboard using sample GitLab data.
+Run `invocra --demo` to explore the dashboard using built-in sample GitLab data.
 
 Watch CI across projects, pin a branch, open a failed job's log, search with `/`,
-then press `R` and confirm to retry. Inspect the new run in the same dashboard.
+then select the failed job in the pipeline pane, press `R` and confirm to simulate
+a retry. Demo actions only show a status message; sample data stays unchanged and
+no new run is created.
 
 ## Features
 
@@ -39,6 +40,8 @@ then press `R` and confirm to retry. Inspect the new run in the same dashboard.
 
 ## Installation
 
+`invocra --demo` — try it without a GitLab account.
+
 Source repository: [dsszs3333/invocra](https://github.com/dsszs3333/invocra).
 
 ### Homebrew (macOS and Linux)
@@ -48,8 +51,9 @@ brew install dsszs3333/tap/invocra
 invocra --version
 ```
 
-The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) builds v0.1.1
-from source. Homebrew installs Rust as a build dependency; installation can take several minutes.
+The public [Homebrew tap](https://github.com/dsszs3333/homebrew-tap) currently builds v0.1.1
+from source; its 0.2.0 update follows release verification. Homebrew installs Rust
+as a build dependency; installation can take several minutes.
 
 To update an existing installation:
 
@@ -60,25 +64,32 @@ brew upgrade dsszs3333/tap/invocra
 
 ### Linux x86_64 release
 
-Download [v0.1.1](https://github.com/dsszs3333/invocra/releases/tag/v0.1.1), verify the checksum and install the binary:
+Download [v0.2.0](https://github.com/dsszs3333/invocra/releases/tag/v0.2.0), verify the checksum and install the binary:
 
 ```bash
 mkdir -p invocra-download
 cd invocra-download
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.1/invocra-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.1.1/SHA256SUMS
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.0/invocra-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.0/SHA256SUMS
 sha256sum --check SHA256SUMS
-tar -xzf invocra-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf invocra-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
 install -Dm755 invocra "$HOME/.local/bin/invocra"
 "$HOME/.local/bin/invocra" --version
 ```
 
 Ensure `~/.local/bin` is on your `PATH`. This archive requires Linux x86_64 and glibc 2.39 or newer. On macOS, Linux ARM64, or systems with older glibc, use the pinned source installation below.
 
+### crates.io (Rust 1.88 or newer)
+
+```bash
+cargo install invocra --locked
+invocra --version
+```
+
 ### From a pinned Git tag (Rust 1.88 or newer)
 
 ```bash
-cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.1.1 --locked invocra
+cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.2.0 --locked invocra
 invocra --version
 ```
 
@@ -244,6 +255,8 @@ partially, and uses the terminal's default foreground and background colors.
 The [terminal composition](crates/tui/src/render/invocra.txt) preserves the supplied ASCII pentacle
 and three candles. Its wordmark encodes the Terminal Gothic bitmap glyphs as Unicode Braille cells,
 so it uses the terminal's own font and requires Braille glyph support. No TTF is loaded by the app.
+
+![Invocra ritual: a pentacle on the left, two candles before the name and one after it](assets/invocra-ritual.png)
 
 ## Credits
 

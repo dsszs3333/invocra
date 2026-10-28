@@ -205,12 +205,16 @@ impl LocalStateStore {
             path: self.path.clone(),
             source,
         };
-        let parent = self.path.parent().filter(|path| !path.as_os_str().is_empty())
+        let parent = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         let mut file = tempfile::NamedTempFile::new_in(parent).map_err(write_err)?;
         file.write_all(raw.as_bytes()).map_err(write_err)?;
         file.as_file().sync_all().map_err(write_err)?;
-        file.persist(&self.path).map_err(|err| write_err(err.error))?;
+        file.persist(&self.path)
+            .map_err(|err| write_err(err.error))?;
         Ok(())
     }
 }
@@ -264,7 +268,10 @@ mod tests {
         keyring::set_default_credential_builder(Box::new(SeededKeyring));
         let first = super::TokenStore::for_instance("https://first.example");
         assert_eq!(
-            first.load_keyring_token().expect("load instance token").as_deref(),
+            first
+                .load_keyring_token()
+                .expect("load instance token")
+                .as_deref(),
             Some("instance-test-token")
         );
         assert_eq!(
@@ -359,15 +366,21 @@ mod tests {
     fn serialization_failure_preserves_existing_cache() {
         struct Unserializable;
         impl serde::Serialize for Unserializable {
-            fn serialize<S: serde::Serializer>(&self, _: S) -> std::result::Result<S::Ok, S::Error> {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
                 Err(serde::ser::Error::custom("synthetic serialization failure"))
             }
         }
-        let dir = tempdir().expect("tempdir"); let path = dir.path().join("cache.json");
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("cache.json");
         std::fs::write(&path, "original cache").expect("seed");
         let store = LocalStateStore::from_path(&path);
         assert!(store.save_state(&Unserializable).is_err());
-        assert_eq!(std::fs::read_to_string(path).expect("unchanged file"), "original cache");
+        assert_eq!(
+            std::fs::read_to_string(path).expect("unchanged file"),
+            "original cache"
+        );
     }
-
 }

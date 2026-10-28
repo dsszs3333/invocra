@@ -11,18 +11,6 @@ use config::ProjectEntry;
 use gitlab::{Bridge, Job, Pipeline, Project};
 use serde::{Deserialize, Serialize};
 
-/// File name of the dashboard cache within the user config directory.
-pub const DASHBOARD_CACHE_FILE: &str = "dashboard-cache.json";
-
-/// Resolves the default dashboard cache path inside the user config directory.
-///
-/// # Errors
-///
-/// Returns an error if the config directory cannot be resolved.
-pub fn dashboard_cache_path() -> config::Result<PathBuf> {
-    Ok(config::config_dir()?.join(DASHBOARD_CACHE_FILE))
-}
-
 /// Resolves a URL-bound cache path independent of the order of instance tabs.
 /// Legacy caches have no server identity and must not be adopted automatically.
 ///
@@ -39,7 +27,11 @@ pub(crate) fn cache_identity(url: &str) -> &str {
 
 fn instance_cache_filename(url: &str) -> String {
     let digest = ring::digest::digest(&ring::digest::SHA256, cache_identity(url).as_bytes());
-    let hash: String = digest.as_ref().iter().map(|byte| format!("{byte:02x}")).collect();
+    let hash: String = digest
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     format!("dashboard-cache-{hash}.json")
 }
 
@@ -135,10 +127,20 @@ mod tests {
     }
     #[test]
     fn cache_filenames_distinguish_urls_and_normalize_trailing_slashes() {
-        assert_ne!(super::instance_cache_filename("https://git-a.example"), super::instance_cache_filename("https://git.a.example"));
-        assert_ne!(super::instance_cache_filename("http://git.example"), super::instance_cache_filename("https://git.example"));
-        assert_eq!(super::instance_cache_filename(" https://git.example/// "), super::instance_cache_filename("https://git.example"));
-        assert!(super::instance_cache_filename(&format!("https://{}", "x".repeat(1000))).len() < 100);
+        assert_ne!(
+            super::instance_cache_filename("https://git-a.example"),
+            super::instance_cache_filename("https://git.a.example")
+        );
+        assert_ne!(
+            super::instance_cache_filename("http://git.example"),
+            super::instance_cache_filename("https://git.example")
+        );
+        assert_eq!(
+            super::instance_cache_filename(" https://git.example/// "),
+            super::instance_cache_filename("https://git.example")
+        );
+        assert!(
+            super::instance_cache_filename(&format!("https://{}", "x".repeat(1000))).len() < 100
+        );
     }
-
 }

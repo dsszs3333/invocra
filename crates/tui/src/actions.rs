@@ -131,9 +131,11 @@ pub(crate) fn spawn_action(
             Action::ApproveMr { project_id, iid } => {
                 client.approve_merge_request(*project_id, *iid).await
             }
-            Action::MergeMr { project_id, iid, sha } => {
-                client.merge_merge_request(*project_id, *iid, sha).await
-            }
+            Action::MergeMr {
+                project_id,
+                iid,
+                sha,
+            } => client.merge_merge_request(*project_id, *iid, sha).await,
         };
 
         let _ = tx
@@ -380,7 +382,9 @@ pub(crate) fn spawn_pipeline_jobs_fetch(
         );
         let result = match (pipeline, jobs, bridges) {
             (Ok(pipeline), Ok(jobs), Ok(bridges)) => Ok((pipeline, jobs, bridges)),
-            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => Err(describe_gitlab_error(&err)),
+            (Err(err), _, _) | (_, Err(err), _) | (_, _, Err(err)) => {
+                Err(describe_gitlab_error(&err))
+            }
         };
         let _ = tx
             .send(AppEvent::PipelineJobsLoaded {

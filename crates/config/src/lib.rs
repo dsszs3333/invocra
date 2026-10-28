@@ -341,11 +341,15 @@ pub fn ensure_config_exists() -> Result<ConfigBootstrap> {
     };
     let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))
         .map_err(write_err)?;
-    file.write_all(EXAMPLE_CONFIG.as_bytes()).map_err(write_err)?;
+    file.write_all(EXAMPLE_CONFIG.as_bytes())
+        .map_err(write_err)?;
     file.as_file().sync_all().map_err(write_err)?;
     if let Err(err) = file.persist_noclobber(&path) {
         if err.error.kind() == std::io::ErrorKind::AlreadyExists {
-            return Ok(ConfigBootstrap { path, created: false });
+            return Ok(ConfigBootstrap {
+                path,
+                created: false,
+            });
         }
         return Err(write_err(err.error));
     }
@@ -410,8 +414,8 @@ pub fn save_config(config: &AppConfig) -> Result<PathBuf> {
 
 fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<()> {
     config.validate()?;
-    let raw = toml::to_string_pretty(config)
-        .map_err(|source| ConfigError::SerializeConfig { source })?;
+    let raw =
+        toml::to_string_pretty(config).map_err(|source| ConfigError::SerializeConfig { source })?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|source| ConfigError::CreateConfigDir {
             path: parent.to_path_buf(),
@@ -760,25 +764,35 @@ path = "my-org"
     }
     #[test]
     fn invalid_config_does_not_replace_existing_file() {
-        let dir = tempdir().expect("tempdir"); let path = dir.path().join("projects.toml");
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("projects.toml");
         fs::write(&path, "original content").expect("seed");
-        let invalid = AppConfig { instances: vec![], settings: Settings::default() };
+        let invalid = AppConfig {
+            instances: vec![],
+            settings: Settings::default(),
+        };
         assert!(super::save_config_to_path(&invalid, &path).is_err());
-        assert_eq!(fs::read_to_string(&path).expect("unchanged file"), "original content");
+        assert_eq!(
+            fs::read_to_string(&path).expect("unchanged file"),
+            "original content"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn config_save_replaces_file_atomically_and_keeps_old_reader_intact() {
         use std::io::Read;
-        let dir = tempdir().expect("tempdir"); let path = dir.path().join("projects.toml");
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("projects.toml");
         fs::write(&path, "original content").expect("seed");
         let mut old_reader = fs::File::open(&path).expect("old reader");
         let cfg = super::default_config().expect("sample");
         super::save_config_to_path(&cfg, &path).expect("save");
-        let mut original = String::new(); old_reader.read_to_string(&mut original).expect("old content");
+        let mut original = String::new();
+        old_reader
+            .read_to_string(&mut original)
+            .expect("old content");
         assert_eq!(original, "original content");
         assert_eq!(load_config_from_path(&path).expect("new config"), cfg);
     }
-
 }

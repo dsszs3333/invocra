@@ -12,6 +12,20 @@ use crate::state::{
 /// Lines jumped by PageUp/PageDown in the log viewer.
 const LOG_PAGE_STEP: usize = 20;
 
+/// Moves one row within the list bounds, returning whether the selection changed.
+pub(crate) fn step(selected: &mut usize, len: usize, down: bool) -> bool {
+    if down {
+        if *selected < len.saturating_sub(1) {
+            *selected += 1;
+            return true;
+        }
+    } else if *selected > 0 {
+        *selected -= 1;
+        return true;
+    }
+    false
+}
+
 /// Side effects requested by key handling; executed by the run loop.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Command {
@@ -246,7 +260,7 @@ fn overlay_wants_close(overlay: &Overlay, code: KeyCode) -> bool {
             !view.searching && matches!(code, KeyCode::Esc | KeyCode::Char('q' | 'v'))
         }
         // The value window restores the variables overlay on close, so it handles Esc/q itself.
-        Overlay::VariableValue(_) => false,
+        Overlay::VariableValue(_) | Overlay::None => false,
         Overlay::Pipelines(_) => matches!(code, KeyCode::Esc | KeyCode::Char('q' | 'P')),
         Overlay::Environments(_) => matches!(code, KeyCode::Esc | KeyCode::Char('q' | 'e')),
         // While the create form or detail view is open, Esc/q/typing belong to them, not the overlay.
@@ -254,7 +268,6 @@ fn overlay_wants_close(overlay: &Overlay, code: KeyCode) -> bool {
             view.in_list_mode() && matches!(code, KeyCode::Esc | KeyCode::Char('q' | 'T'))
         }
         Overlay::ActionMenu(_) => matches!(code, KeyCode::Esc | KeyCode::Char('q' | 'x')),
-        Overlay::None => false,
     }
 }
 
@@ -262,11 +275,11 @@ fn overlay_wants_close(overlay: &Overlay, code: KeyCode) -> bool {
 /// (external URL when set, else the deploy job's page); `q`/`Esc`/`e` close it.
 fn handle_environments_input(view: &mut EnvironmentsViewState, code: KeyCode) -> Vec<Command> {
     match code {
-        KeyCode::Char('j') | KeyCode::Down if view.selected + 1 < view.environments.len() => {
-            view.selected += 1;
+        KeyCode::Char('j') | KeyCode::Down => {
+            step(&mut view.selected, view.environments.len(), true);
         }
-        KeyCode::Char('k') | KeyCode::Up if view.selected > 0 => {
-            view.selected -= 1;
+        KeyCode::Char('k') | KeyCode::Up => {
+            step(&mut view.selected, view.environments.len(), false);
         }
         KeyCode::Enter | KeyCode::Char('o') => {
             if let Some(url) = view.selected_url() {
@@ -298,11 +311,11 @@ fn handle_tags_input(state: &mut AppState, code: KeyCode) -> Vec<Command> {
     let Some(form) = &mut view.creating else {
         // List mode.
         match code {
-            KeyCode::Char('j') | KeyCode::Down if view.selected + 1 < view.tags.len() => {
-                view.selected += 1;
+            KeyCode::Char('j') | KeyCode::Down => {
+                step(&mut view.selected, view.tags.len(), true);
             }
-            KeyCode::Char('k') | KeyCode::Up if view.selected > 0 => {
-                view.selected -= 1;
+            KeyCode::Char('k') | KeyCode::Up => {
+                step(&mut view.selected, view.tags.len(), false);
             }
             KeyCode::Char('n') => view.creating = Some(CreateTagForm::default()),
             KeyCode::Enter => {
@@ -348,11 +361,11 @@ fn handle_pipelines_input(state: &mut AppState, code: KeyCode) -> Vec<Command> {
         return Vec::new();
     };
     match code {
-        KeyCode::Char('j') | KeyCode::Down if view.selected + 1 < view.pipelines.len() => {
-            view.selected += 1;
+        KeyCode::Char('j') | KeyCode::Down => {
+            step(&mut view.selected, view.pipelines.len(), true);
         }
-        KeyCode::Char('k') | KeyCode::Up if view.selected > 0 => {
-            view.selected -= 1;
+        KeyCode::Char('k') | KeyCode::Up => {
+            step(&mut view.selected, view.pipelines.len(), false);
         }
         KeyCode::Enter => {
             let Some(pipeline) = view.pipelines.get(view.selected).cloned() else {
@@ -538,15 +551,13 @@ fn handle_variables_input(view: &mut VariablesViewState, code: KeyCode) -> Vec<C
             view.searching = true;
             view.notice = None;
         }
-        KeyCode::Char('j') | KeyCode::Down if view.selected + 1 < view.matching().len() => {
-            view.selected += 1;
-            view.revealed = false;
-            view.notice = None;
-        }
-        KeyCode::Char('k') | KeyCode::Up if view.selected > 0 => {
-            view.selected -= 1;
-            view.revealed = false;
-            view.notice = None;
+        KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => {
+            let len = view.matching().len();
+            let down = matches!(code, KeyCode::Char('j') | KeyCode::Down);
+            if step(&mut view.selected, len, down) {
+                view.revealed = false;
+                view.notice = None;
+            }
         }
         KeyCode::Char('s') => view.revealed = !view.revealed,
         KeyCode::Char('y') => {
@@ -722,14 +733,12 @@ fn handle_focus_keys(state: &mut AppState, code: KeyCode) -> Option<Vec<Command>
             }
             state.focus = next;
         }
-        KeyCode::Char('1') => state.focus = Focus::Projects,
+        // h/l move between the left column (projects) and the right log pane.
+        KeyCode::Char('1' | 'h') | KeyCode::Left => state.focus = Focus::Projects,
         KeyCode::Char('2') => state.focus = Focus::Branches,
         KeyCode::Char('3') => state.focus = Focus::Detail,
-        KeyCode::Char('4') => state.focus = Focus::Log,
+        KeyCode::Char('4' | 'l') | KeyCode::Right => state.focus = Focus::Log,
         KeyCode::Char('5') => return Some(focus_mr_panel(state)),
-        // h/l move between the left column (projects) and the right log pane.
-        KeyCode::Char('h') | KeyCode::Left => state.focus = Focus::Projects,
-        KeyCode::Char('l') | KeyCode::Right => state.focus = Focus::Log,
         // `+` toggles expanding the focused panel to fill the screen; `_` always collapses back.
         KeyCode::Char('+') => {
             state.screen_mode = match state.screen_mode {
@@ -838,7 +847,44 @@ fn handle_action_keys(state: &mut AppState, code: KeyCode) -> Option<Vec<Command
 fn open_action_menu(state: &mut AppState) {
     let mut items: Vec<ActionMenuItem> = Vec::new();
 
-    // MR-targeted actions when the MR panel is focused.
+    append_mr_actions(state, &mut items);
+    append_job_actions(state, &mut items);
+    append_pipeline_actions(state, &mut items);
+
+    // Open / copy the URL for the current context (job page, else pipeline, else project).
+    if let Some(url) = state.browse_url() {
+        items.push(ActionMenuItem {
+            label: String::from("Open in browser"),
+            description: String::from("open this page in the default browser"),
+            disabled_reason: None,
+            effect: MenuEffect::Open(url.clone()),
+        });
+        items.push(ActionMenuItem {
+            label: String::from("Copy URL"),
+            description: String::from("copy this page's URL to the clipboard"),
+            disabled_reason: None,
+            effect: MenuEffect::Copy(url),
+        });
+    }
+
+    if items.is_empty() {
+        state.status_message = String::from("No actions available here");
+        return;
+    }
+    // Start the cursor on the first enabled item so Enter does something useful.
+    let selected = items
+        .iter()
+        .position(|item| item.disabled_reason.is_none())
+        .unwrap_or(0);
+    state.overlay = Overlay::ActionMenu(ActionMenuState {
+        title: String::from("Actions"),
+        items,
+        selected,
+    });
+}
+
+/// Appends actions for the focused merge request.
+fn append_mr_actions(state: &AppState, items: &mut Vec<ActionMenuItem>) {
     if state.focus == Focus::MergeRequests {
         if let Some(mr) = state.mr_panel.selected_mr() {
             let in_flight = state.is_in_flight(mr.project_id, mr.iid);
@@ -875,8 +921,10 @@ fn open_action_menu(state: &mut AppState) {
             });
         }
     }
+}
 
-    // Job-targeted actions when a job is focused in the detail panel.
+/// Appends actions for the focused job.
+fn append_job_actions(state: &AppState, items: &mut Vec<ActionMenuItem>) {
     if state.focus == Focus::Detail {
         if let Some(job) = selected_job_info(state) {
             let in_flight = state.is_in_flight(job.project_id, job.job_id);
@@ -936,8 +984,10 @@ fn open_action_menu(state: &mut AppState) {
             });
         }
     }
+}
 
-    // Pipeline-targeted actions for the selected project's pipeline.
+/// Appends actions for the selected project's pipeline.
+fn append_pipeline_actions(state: &AppState, items: &mut Vec<ActionMenuItem>) {
     if let Some(pipeline) = selected_pipeline_info(state) {
         if let (Some(pipeline_id), Some(status)) = (pipeline.pipeline_id, pipeline.status.as_ref())
         {
@@ -996,37 +1046,6 @@ fn open_action_menu(state: &mut AppState) {
             },
         });
     }
-
-    // Open / copy the URL for the current context (job page, else pipeline, else project).
-    if let Some(url) = state.browse_url() {
-        items.push(ActionMenuItem {
-            label: String::from("Open in browser"),
-            description: String::from("open this page in the default browser"),
-            disabled_reason: None,
-            effect: MenuEffect::Open(url.clone()),
-        });
-        items.push(ActionMenuItem {
-            label: String::from("Copy URL"),
-            description: String::from("copy this page's URL to the clipboard"),
-            disabled_reason: None,
-            effect: MenuEffect::Copy(url),
-        });
-    }
-
-    if items.is_empty() {
-        state.status_message = String::from("No actions available here");
-        return;
-    }
-    // Start the cursor on the first enabled item so Enter does something useful.
-    let selected = items
-        .iter()
-        .position(|item| item.disabled_reason.is_none())
-        .unwrap_or(0);
-    state.overlay = Overlay::ActionMenu(ActionMenuState {
-        title: String::from("Actions"),
-        items,
-        selected,
-    });
 }
 
 /// Navigation and selection in the action menu. `j/k` move the cursor; `Enter` resolves the
@@ -1036,12 +1055,12 @@ fn handle_action_menu_input(state: &mut AppState, code: KeyCode) -> Vec<Command>
         return Vec::new();
     };
     match code {
-        KeyCode::Char('j') | KeyCode::Down if menu.selected + 1 < menu.items.len() => {
-            menu.selected += 1;
+        KeyCode::Char('j') | KeyCode::Down => {
+            step(&mut menu.selected, menu.items.len(), true);
             Vec::new()
         }
-        KeyCode::Char('k') | KeyCode::Up if menu.selected > 0 => {
-            menu.selected -= 1;
+        KeyCode::Char('k') | KeyCode::Up => {
+            step(&mut menu.selected, menu.items.len(), false);
             Vec::new()
         }
         KeyCode::Enter => {
@@ -1097,6 +1116,10 @@ fn handle_action_menu_input(state: &mut AppState, code: KeyCode) -> Vec<Command>
 }
 
 /// Human-readable size for the artifacts archive, e.g. "3.4 MB".
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Byte sizes are only displayed to one decimal place in KB or MB"
+)]
 fn format_size(bytes: u64) -> String {
     match bytes {
         0..=1023 => format!("{bytes} B"),
@@ -1175,7 +1198,9 @@ fn selected_pipeline_info(state: &AppState) -> Option<SelectedPipeline> {
         project_id,
         pipeline_id: pipeline.map(|pipeline| pipeline.id),
         status: pipeline.map(|pipeline| pipeline.status.clone()),
-        ref_: if state.focus == Focus::Detail && state.viewed_pipeline.contains_key(&item.configured.id) {
+        ref_: if state.focus == Focus::Detail
+            && state.viewed_pipeline.contains_key(&item.configured.id)
+        {
             pipeline.and_then(|pipeline| pipeline.ref_.clone())
         } else {
             state.effective_ref(item.configured.id)
@@ -1262,7 +1287,10 @@ fn request_run_pipeline(state: &mut AppState) {
         state.status_message = String::from("Run: no branch to run on");
         return;
     };
-    state.overlay = Overlay::Confirm(Action::RunPipeline { project_id: pipeline.project_id, ref_ });
+    state.overlay = Overlay::Confirm(Action::RunPipeline {
+        project_id: pipeline.project_id,
+        ref_,
+    });
 }
 
 /// Inspects the downstream pipeline of the selected bridge row in the detail panel, reusing the
@@ -1379,7 +1407,11 @@ pub(crate) fn focus_mr_panel(state: &mut AppState) -> Vec<Command> {
 }
 
 pub(crate) fn focus_mr_refresh(state: &mut AppState) -> Vec<Command> {
-    if state.focus == Focus::MergeRequests { ensure_mr_list(state) } else { Vec::new() }
+    if state.focus == Focus::MergeRequests {
+        ensure_mr_list(state)
+    } else {
+        Vec::new()
+    }
 }
 
 /// Requests the MR list when the panel has nothing usable for the current scope/project.
@@ -1419,13 +1451,7 @@ fn cycle_mr_scope(state: &mut AppState) -> Vec<Command> {
 /// Moves the MR cursor and lazily requests the newly selected row's head pipeline.
 fn mr_move(state: &mut AppState, down: bool) -> Vec<Command> {
     let panel = &mut state.mr_panel;
-    if down {
-        if panel.selected + 1 < panel.mrs.len() {
-            panel.selected += 1;
-        }
-    } else if panel.selected > 0 {
-        panel.selected -= 1;
-    }
+    step(&mut panel.selected, panel.mrs.len(), down);
     request_selected_head_pipeline(state)
 }
 
@@ -1557,6 +1583,23 @@ mod tests {
     use crate::cache::SnapshotOrigin;
     use crate::refresh::RefreshSources;
     use crate::state::{AppState, Focus, Overlay, ProjectSnapshot, ProjectStatus};
+
+    #[test]
+    fn step_moves_only_within_list_bounds() {
+        for (start, len, down, expected) in [
+            (0, 0, true, 0),
+            (0, 0, false, 0),
+            (0, 1, true, 0),
+            (0, 1, false, 0),
+            (0, 2, true, 1),
+            (1, 2, false, 0),
+            (1, 2, true, 1),
+        ] {
+            let mut selected = start;
+            assert_eq!(super::step(&mut selected, len, down), start != expected);
+            assert_eq!(selected, expected);
+        }
+    }
 
     fn state_with_projects(names: &[(&str, u64)]) -> AppState {
         AppState::new(RefreshSources {
@@ -2377,6 +2420,24 @@ mod tests {
         };
         assert!(view.revealed);
 
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Down,
+            KeyCode::Up,
+        ] {
+            let Overlay::Variables(view) = &mut state.overlay else {
+                panic!("expected variables overlay");
+            };
+            view.notice = Some(String::from("copied"));
+            press(&mut state, code);
+            let Overlay::Variables(view) = &state.overlay else {
+                panic!("expected variables overlay");
+            };
+            assert!(view.revealed);
+            assert_eq!(view.notice.as_deref(), Some("copied"));
+        }
+
         press(&mut state, KeyCode::Char('v'));
         assert_eq!(state.overlay, Overlay::None);
     }
@@ -2732,29 +2793,54 @@ mod tests {
             let mut state = state_with_pipeline("running", vec![]);
             let mut viewed = pipeline("running");
             viewed.id = 500;
-            state.viewed_pipeline.insert(1, crate::state::ViewedPipeline {
-                project_id, pipeline: viewed, jobs: vec![job(999, "downstream", "failed")],
-                bridges: vec![], loading: false, error: None,
-            });
+            state.viewed_pipeline.insert(
+                1,
+                crate::state::ViewedPipeline {
+                    project_id,
+                    pipeline: viewed,
+                    jobs: vec![job(999, "downstream", "failed")],
+                    bridges: vec![],
+                    loading: false,
+                    error: None,
+                },
+            );
             state.focus = Focus::Detail;
             press(&mut state, KeyCode::Char('R'));
-            assert_eq!(state.overlay, Overlay::Confirm(Action::RetryJob {
-                project_id, job_id: 999, job_name: "downstream".into(),
-            }));
+            assert_eq!(
+                state.overlay,
+                Overlay::Confirm(Action::RetryJob {
+                    project_id,
+                    job_id: 999,
+                    job_name: "downstream".into(),
+                })
+            );
             state.overlay = Overlay::None;
             press(&mut state, KeyCode::Char('c'));
-            assert_eq!(state.overlay, Overlay::Confirm(Action::CancelPipeline {
-                project_id, pipeline_id: 500,
-            }));
+            assert_eq!(
+                state.overlay,
+                Overlay::Confirm(Action::CancelPipeline {
+                    project_id,
+                    pipeline_id: 500,
+                })
+            );
             state.overlay = Overlay::None;
-            assert_eq!(press(&mut state, KeyCode::Char('L')), vec![Command::FetchTrace {
-                project_id, job_id: 999, generation: 1,
-            }]);
+            assert_eq!(
+                press(&mut state, KeyCode::Char('L')),
+                vec![Command::FetchTrace {
+                    project_id,
+                    job_id: 999,
+                    generation: 1,
+                }]
+            );
             state.focus = Focus::Projects;
             press(&mut state, KeyCode::Char('c'));
-            assert_eq!(state.overlay, Overlay::Confirm(Action::CancelPipeline {
-                project_id: 1, pipeline_id: 42,
-            }));
+            assert_eq!(
+                state.overlay,
+                Overlay::Confirm(Action::CancelPipeline {
+                    project_id: 1,
+                    pipeline_id: 42,
+                })
+            );
         }
     }
 
@@ -2764,25 +2850,45 @@ mod tests {
         state.focus = Focus::MergeRequests;
         state.mr_panel.mrs = vec![mr(5, "Review")];
         press(&mut state, KeyCode::Char('x'));
-        let Overlay::ActionMenu(menu) = &mut state.overlay else { panic!("menu"); };
-        menu.selected = menu.items.iter().position(|item| item.label == "Merge MR").expect("merge item");
+        let Overlay::ActionMenu(menu) = &mut state.overlay else {
+            panic!("menu");
+        };
+        menu.selected = menu
+            .items
+            .iter()
+            .position(|item| item.label == "Merge MR")
+            .expect("merge item");
         press(&mut state, KeyCode::Enter);
         state.mr_panel.mrs[0].sha = Some("new-unreviewed-sha".into());
-        assert_eq!(press(&mut state, KeyCode::Char('y')), vec![Command::Dispatch(Action::MergeMr {
-            project_id: 1, iid: 5, sha: "reviewed-sha".into(),
-        })]);
+        assert_eq!(
+            press(&mut state, KeyCode::Char('y')),
+            vec![Command::Dispatch(Action::MergeMr {
+                project_id: 1,
+                iid: 5,
+                sha: "reviewed-sha".into(),
+            })]
+        );
     }
 
     #[test]
     fn merge_is_disabled_without_the_source_sha() {
         let mut state = state_with_pipeline("success", vec![]);
         state.focus = Focus::MergeRequests;
-        let mut request = mr(5, "Review"); request.sha = None;
+        let mut request = mr(5, "Review");
+        request.sha = None;
         state.mr_panel.mrs = vec![request];
         press(&mut state, KeyCode::Char('x'));
-        let Overlay::ActionMenu(menu) = &state.overlay else { panic!("menu"); };
-        assert!(menu.items.iter().find(|item| item.label == "Merge MR").expect("merge item")
-            .disabled_reason.as_deref().expect("disabled reason").contains("SHA"));
+        let Overlay::ActionMenu(menu) = &state.overlay else {
+            panic!("menu");
+        };
+        assert!(menu
+            .items
+            .iter()
+            .find(|item| item.label == "Merge MR")
+            .expect("merge item")
+            .disabled_reason
+            .as_deref()
+            .expect("disabled reason")
+            .contains("SHA"));
     }
-
 }

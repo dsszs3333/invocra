@@ -11,8 +11,16 @@ use storage::TokenStore;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(name = "invocra", about = "Invocra", version)]
+#[command(
+    name = "invocra",
+    about = "Invocra",
+    version,
+    args_conflicts_with_subcommands = true
+)]
 struct Cli {
+    /// Try the full dashboard without a GitLab account; no config, credentials or network.
+    #[arg(long)]
+    demo: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -84,6 +92,9 @@ fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    if cli.demo {
+        return tui::run_dashboard(vec![tui::InstanceRuntime::demo().await?], false).await;
+    }
 
     match cli.command {
         Some(Commands::Auth(auth)) => match auth.command {
@@ -364,7 +375,10 @@ async fn launch_tui() -> Result<()> {
 }
 
 async fn launch_setup(mut config: AppConfig, replace_sample: bool) -> Result<()> {
-    let default_url = config.instances.first().map(|instance| instance.url.clone());
+    let default_url = config
+        .instances
+        .first()
+        .map(|instance| instance.url.clone());
     let Some(instances) = tui::run_onboarding(default_url).await? else {
         println!("Setup cancelled. Run `invocra setup` to retry.");
         return Ok(());
@@ -374,8 +388,14 @@ async fn launch_setup(mut config: AppConfig, replace_sample: bool) -> Result<()>
     tui::run_dashboard(instances, config.settings.notifications).await
 }
 
-fn merge_setup_instances(config: &mut AppConfig, instances: &[tui::InstanceRuntime], replace_sample: bool) {
-    if replace_sample { config.instances.clear(); }
+fn merge_setup_instances(
+    config: &mut AppConfig,
+    instances: &[tui::InstanceRuntime],
+    replace_sample: bool,
+) {
+    if replace_sample {
+        config.instances.clear();
+    }
     for rt in instances {
         let instance = InstanceConfig {
             url: rt.url.clone(),
@@ -406,8 +426,27 @@ mod tests {
         assert_eq!(command.get_name(), "invocra");
         let help = command.render_long_help().to_string();
         assert!(help.contains("Invocra"));
+        assert!(help.contains("--demo"));
+        assert!(help.contains("without a GitLab account"));
         for name in ["auth", "config", "doctor", "setup"] {
             assert!(command.find_subcommand(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn demo_flag_cannot_be_combined_with_commands_that_access_credentials() {
+        use clap::Parser;
+        assert!(
+            super::Cli::try_parse_from(["invocra", "--demo"])
+                .expect("demo CLI")
+                .demo
+        );
+        for args in [
+            vec!["--demo", "setup"],
+            vec!["--demo", "auth", "login"],
+            vec!["doctor", "--demo"],
+        ] {
+            assert!(super::Cli::try_parse_from(std::iter::once("invocra").chain(args)).is_err());
         }
     }
 
@@ -437,29 +476,42 @@ mod tests {
     #[test]
     fn explicit_setup_updates_one_instance_without_losing_others() {
         let make = |url: &str| config::InstanceConfig {
-            url: url.into(), proxy: Some("socks5://localhost:1080".into()),
-            allow_insecure_http: false, projects: vec![], groups: vec![],
+            url: url.into(),
+            proxy: Some("socks5://localhost:1080".into()),
+            allow_insecure_http: false,
+            projects: vec![],
+            groups: vec![],
         };
         let mut cfg = config::AppConfig {
-            instances: vec![make("https://first.example"), make("https://second.example")],
+            instances: vec![
+                make("https://first.example"),
+                make("https://second.example"),
+            ],
             settings: config::Settings::default(),
         };
         let second = cfg.instances[1].clone();
         let selected = [tui::InstanceRuntime {
             url: "https://first.example".into(),
-            client: gitlab::GitLabClient::new("https://first.example", "test", None).expect("client"),
+            client: gitlab::GitLabClient::new("https://first.example", "test", None)
+                .expect("client"),
             sources: tui::RefreshSources {
-                projects: vec![config::ProjectEntry { id: 10, name: "selected".into() }], groups: vec![],
+                projects: vec![config::ProjectEntry {
+                    id: 10,
+                    name: "selected".into(),
+                }],
+                groups: vec![],
             },
         }];
         super::merge_setup_instances(&mut cfg, &selected, false);
         assert_eq!(cfg.instances.len(), 2);
         assert_eq!(cfg.instances[1], second);
         assert_eq!(cfg.instances[0].projects[0].id, 10);
-        assert_eq!(cfg.instances[0].proxy.as_deref(), Some("socks5://localhost:1080"));
+        assert_eq!(
+            cfg.instances[0].proxy.as_deref(),
+            Some("socks5://localhost:1080")
+        );
         super::merge_setup_instances(&mut cfg, &selected, true);
         assert_eq!(cfg.instances.len(), 1);
         assert_eq!(cfg.instances[0].projects[0].id, 10);
     }
-
 }

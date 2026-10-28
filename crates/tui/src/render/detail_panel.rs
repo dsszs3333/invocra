@@ -209,8 +209,12 @@ fn render_jobs(
             || "-".into(),
             |seconds| {
                 // Monotonic stopwatch for a running job; finished jobs read the server value.
-                let secs =
-                    state.timer_secs(project_id, job.id, seconds as u64, job.status.is_active());
+                let secs = state.timer_secs(
+                    project_id,
+                    job.id,
+                    crate::state::job_duration_secs(seconds),
+                    job.status.is_active(),
+                );
                 format_duration(secs)
             },
         );

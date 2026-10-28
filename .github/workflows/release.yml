@@ -2,37 +2,86 @@ name: release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write  # needed to create the GitHub Release
 
 jobs:
-  release-linux:
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check release version
+        id: version
+        shell: bash
+        run: |
+          version=$(python3 - <<'PY'
+          import re
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+              raise SystemExit("Release version must be MAJOR.MINOR.PATCH")
+          print(version)
+          PY
+          )
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "$tag already exists; skipping release."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release-linux:
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.88
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit --locked --version 0.22.2
       - run: cargo audit
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libsecret-1-dev
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo package -p invocra-config --locked
       - run: cargo build --release --locked --target x86_64-unknown-linux-gnu -p invocra
       - name: Package
         run: |
           mkdir -p dist
-          tar -czf "dist/invocra-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" -C target/x86_64-unknown-linux-gnu/release invocra
+          tar -czf "dist/invocra-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" -C target/x86_64-unknown-linux-gnu/release invocra
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
       - name: Verify packaged binary
         run: |
           (cd dist && sha256sum --check SHA256SUMS)
           mkdir -p "$RUNNER_TEMP/invocra-release-smoke"
-          tar -xzf "dist/invocra-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz" -C "$RUNNER_TEMP/invocra-release-smoke"
+          tar -xzf "dist/invocra-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz" -C "$RUNNER_TEMP/invocra-release-smoke"
           "$RUNNER_TEMP/invocra-release-smoke/invocra" --help
-          test "$("$RUNNER_TEMP/invocra-release-smoke/invocra" --version)" = "invocra ${GITHUB_REF_NAME#v}"
+          test "$("$RUNNER_TEMP/invocra-release-smoke/invocra" --version)" = "invocra ${RELEASE_TAG#v}"
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: invocra ${{ github.ref_name }}
+          name: invocra ${{ env.RELEASE_TAG }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: dist/*

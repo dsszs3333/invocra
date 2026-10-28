@@ -1,6 +1,11 @@
 /target
-.DS_Store
+/TODO.md
+/todo.md
+/docs
 
-# Local heap profiler output
+# dhat heap profiler output
 dhat-heap.json
+
+# Local generated files
+.DS_Store
 profile.json.gz

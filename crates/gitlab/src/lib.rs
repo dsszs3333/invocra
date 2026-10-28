@@ -1,17 +1,31 @@
-//! Read-only GitLab REST client and response DTOs used by the dashboard.
+//! GitLab client and response DTOs used by the dashboard.
 
 use std::num::ParseIntError;
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
+
+mod demo;
+mod http;
+
+/// Reserved, fictional server used by the built-in demo.
+pub const DEMO_URL: &str = "https://demo.gitlab.example";
 
 pub type Result<T> = std::result::Result<T, GitLabError>;
 
 #[derive(Debug, Error)]
 pub enum GitLabError {
+    #[error("invalid built-in demo data")]
+    DemoData {
+        #[from]
+        source: serde_json::Error,
+    },
+    #[error("Demo mode: actions are simulated")]
+    DemoAction,
+    #[error("Demo mode: no fixture for {path}")]
+    DemoMissing { path: String },
     #[error("failed to encode GitLab token header")]
     InvalidTokenHeader {
         #[source]
@@ -83,16 +97,35 @@ impl GitLabError {
     }
 }
 
-/// Read-only GitLab API client configured with a personal access token.
+/// GitLab API client backed by HTTP or built-in demo data.
 #[derive(Debug, Clone)]
 pub struct GitLabClient {
-    base_url: String,
-    client: reqwest::Client,
-    artifacts_client: reqwest::Client,
-    token_header: HeaderValue,
+    backend: Backend,
+}
+
+#[derive(Debug, Clone)]
+enum Backend {
+    Http(http::HttpClient),
+    Demo(demo::DemoClient),
 }
 
 impl GitLabClient {
+    /// Builds a completely offline client without credentials or an HTTP transport.
+    ///
+    /// # Errors
+    /// Returns an error if the embedded fixtures cannot be decoded.
+    pub fn demo() -> Result<Self> {
+        Ok(Self {
+            backend: Backend::Demo(demo::DemoClient::new()?),
+        })
+    }
+
+    /// Whether this client serves the built-in demo data.
+    #[must_use]
+    pub fn is_demo(&self) -> bool {
+        matches!(self.backend, Backend::Demo(_))
+    }
+
     /// Builds a GitLab API client for the provided base URL and token.
     ///
     /// `proxy` routes this instance's traffic through an HTTP/HTTPS/SOCKS5 proxy (e.g.
@@ -108,45 +141,8 @@ impl GitLabClient {
         token: impl Into<String>,
         proxy: Option<&str>,
     ) -> Result<Self> {
-        let mut token_header = HeaderValue::from_str(&token.into())
-            .map_err(|source| GitLabError::InvalidTokenHeader { source })?;
-        token_header.set_sensitive(true);
-        let mut headers = HeaderMap::new();
-        headers.insert("PRIVATE-TOKEN", token_header.clone());
-
-        let build_client = |headers, total_timeout| {
-            let mut builder = reqwest::Client::builder()
-                .default_headers(headers)
-                .user_agent(concat!("invocra/", env!("CARGO_PKG_VERSION")))
-                // Never follow redirects: the PRIVATE-TOKEN header is custom, so reqwest would NOT
-                // strip it on a cross-host redirect (it only strips Authorization), which would leak
-                // the token to an attacker-controlled host. GitLab's API needs no redirects anyway.
-                .redirect(reqwest::redirect::Policy::none())
-                // Transparently gzip-decode responses; trims trace/JSON bytes on slow links.
-                .gzip(true)
-                .connect_timeout(Duration::from_secs(20))
-                .read_timeout(Duration::from_secs(20));
-            if total_timeout {
-                builder = builder.timeout(Duration::from_secs(20));
-            }
-            if let Some(proxy) = proxy {
-                builder = builder.proxy(
-                    reqwest::Proxy::all(proxy).map_err(|source| GitLabError::BuildClient { source })?,
-                );
-            }
-            builder
-                .build()
-                .map_err(|source| GitLabError::BuildClient { source })
-        };
-        let client = build_client(headers, true)?;
-        // Archives may take longer than 20s overall; keep connect/read inactivity limits instead.
-        let artifacts_client = build_client(HeaderMap::new(), false)?;
-
         Ok(Self {
-            base_url: base_url.into().trim_end_matches('/').to_string(),
-            client,
-            artifacts_client,
-            token_header,
+            backend: Backend::Http(http::HttpClient::new(base_url, token, proxy)?),
         })
     }
 
@@ -195,7 +191,10 @@ impl GitLabClient {
     ///
     /// Returns an error if the request fails or its response cannot be decoded.
     pub async fn get_pipeline(&self, project_id: u64, pipeline_id: u64) -> Result<Pipeline> {
-        self.get_json(&format!("/api/v4/projects/{project_id}/pipelines/{pipeline_id}")).await
+        self.get_json(&format!(
+            "/api/v4/projects/{project_id}/pipelines/{pipeline_id}"
+        ))
+        .await
     }
 
     #[instrument(skip(self))]
@@ -514,48 +513,10 @@ impl GitLabClient {
     where
         T: for<'de> Deserialize<'de>,
     {
-        let mut page = 1usize;
-        let mut items = Vec::new();
-
-        // hard ceiling so a hostile/MITM server can't drive x-next-page forever and OOM
-        // the client; 1000 pages * per_page=100 = 100k items, far past any real account. Raise if a
-        // legitimate listing ever exceeds it.
-        const MAX_PAGES: usize = 1000;
-
-        for _ in 0..MAX_PAGES {
-            let url = format!("{}{}&page={page}", self.base_url, path_with_query);
-            let response = self.send_get(&url).await?;
-
-            let next_page = next_page_from_headers(response.headers())?;
-
-            let mut batch =
-                response
-                    .json::<Vec<T>>()
-                    .await
-                    .map_err(|source| GitLabError::Decode {
-                        url: url.clone(),
-                        source,
-                    })?;
-            items.append(&mut batch);
-
-            match next_page {
-                Some(next) => {
-                    let next_page =
-                        next.parse::<usize>()
-                            .map_err(|source| GitLabError::InvalidNextPage {
-                                value: next,
-                                source,
-                            })?;
-                    if next_page <= page {
-                        return Err(GitLabError::Pagination { reason: "x-next-page does not advance" });
-                    }
-                    page = next_page;
-                }
-                None => return Ok(items),
-            }
+        match &self.backend {
+            Backend::Http(client) => client.get_paginated_json(path_with_query).await,
+            Backend::Demo(client) => client.get(path_with_query),
         }
-
-        Err(GitLabError::Pagination { reason: "page limit exceeded" })
     }
 
     #[instrument(skip(self, dest))]
@@ -572,71 +533,13 @@ impl GitLabClient {
         job_id: u64,
         dest: &std::path::Path,
     ) -> Result<u64> {
-        use std::io::Write;
-
-        let url = format!(
-            "{}/api/v4/projects/{project_id}/jobs/{job_id}/artifacts",
-            self.base_url
-        );
-        let redirect_err = || GitLabError::ArtifactsRedirect { url: url.clone() };
-        let mut current = reqwest::Url::parse(&url).map_err(|_| redirect_err())?;
-        let origin = current.clone();
-        let mut redirects = 0;
-        let mut response = loop {
-            let response = self.artifacts_request(&current, &origin)
-                .send().await.map_err(|source| GitLabError::Request {
-                    url: url.clone(), source: source.without_url(),
-                })?;
-            if !response.status().is_redirection() {
-                break response.error_for_status().map_err(|source| GitLabError::Status {
-                    url: url.clone(), status: source.status().map(|status| status.as_u16()),
-                    source: source.without_url(),
-                })?;
+        match &self.backend {
+            Backend::Http(client) => {
+                client
+                    .download_job_artifacts(project_id, job_id, dest)
+                    .await
             }
-            redirects += 1;
-            if redirects > 5 { return Err(redirect_err()); }
-            let location = response.headers().get(reqwest::header::LOCATION)
-                .and_then(|value| value.to_str().ok()).ok_or_else(redirect_err)?;
-            let next = current.join(location).map_err(|_| redirect_err())?;
-            if (next.scheme() != "https" && next.origin() != origin.origin())
-                || !next.username().is_empty() || next.password().is_some() {
-                return Err(redirect_err());
-            }
-            current = next;
-        };
-
-        let write_err = |source: std::io::Error| GitLabError::ArtifactsWrite {
-            path: dest.to_path_buf(),
-            source,
-        };
-        // ponytail: short blocking writes on the multi-thread runtime; move to spawn_blocking or
-        // tokio::fs only if downloads ever make the UI stutter.
-        let parent = dest.parent().filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or(std::path::Path::new("."));
-        let mut file = tempfile::NamedTempFile::new_in(parent).map_err(write_err)?;
-        let mut written: u64 = 0;
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|source| GitLabError::Request {
-                url: url.clone(),
-                source: source.without_url(),
-            })?
-        {
-            file.write_all(&chunk).map_err(write_err)?;
-            written += chunk.len() as u64;
-        }
-        file.as_file().sync_all().map_err(write_err)?;
-        file.persist(dest).map_err(|err| write_err(err.error))?;
-        Ok(written)
-    }
-
-    fn artifacts_request(&self, url: &reqwest::Url, origin: &reqwest::Url) -> reqwest::RequestBuilder {
-        let request = self.artifacts_client.get(url.clone());
-        if url.origin() == origin.origin() {
-            request.header("PRIVATE-TOKEN", self.token_header.clone())
-        } else {
-            request
+            Backend::Demo(_) => Err(GitLabError::DemoAction),
         }
     }
 
@@ -644,76 +547,20 @@ impl GitLabClient {
     where
         T: for<'de> Deserialize<'de>,
     {
-        let url = format!("{}{}", self.base_url, path);
-        let response = self.send_get(&url).await?;
-
-        response
-            .json::<T>()
-            .await
-            .map_err(|source| GitLabError::Decode { url, source })
-    }
-
-    /// Performs a GET, retrying once on HTTP 429 after honoring `Retry-After`, then maps
-    /// transport/status failures to [`GitLabError`].
-    ///
-    /// ponytail: single retry; widen to full exponential backoff only if rate limits persist.
-    async fn send_get(&self, url: &str) -> Result<reqwest::Response> {
-        for attempt in 0..2 {
-            let response =
-                self.client
-                    .get(url)
-                    .send()
-                    .await
-                    .map_err(|source| GitLabError::Request {
-                        url: url.to_owned(),
-                        source,
-                    })?;
-
-            if attempt == 0 && response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let wait = retry_after(response.headers())
-                    .unwrap_or(Duration::from_secs(1))
-                    .min(Duration::from_secs(60));
-                tokio::time::sleep(wait).await;
-                continue;
-            }
-
-            return response
-                .error_for_status()
-                .map_err(|source| GitLabError::Status {
-                    url: url.to_owned(),
-                    status: source.status().map(|status| status.as_u16()),
-                    source,
-                });
+        match &self.backend {
+            Backend::Http(client) => client.get_json(path).await,
+            Backend::Demo(client) => client.get(path),
         }
-
-        unreachable!("retry loop returns on the final attempt")
     }
 
     async fn post_json<T>(&self, path: &str) -> Result<T>
     where
         T: for<'de> Deserialize<'de>,
     {
-        let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .post(&url)
-            .send()
-            .await
-            .map_err(|source| GitLabError::Request {
-                url: url.clone(),
-                source,
-            })?
-            .error_for_status()
-            .map_err(|source| GitLabError::Status {
-                url: url.clone(),
-                status: source.status().map(|status| status.as_u16()),
-                source,
-            })?;
-
-        response
-            .json::<T>()
-            .await
-            .map_err(|source| GitLabError::Decode { url, source })
+        match &self.backend {
+            Backend::Http(client) => client.post_json(path).await,
+            Backend::Demo(_) => Err(GitLabError::DemoAction),
+        }
     }
 
     /// Like [`Self::post_json`] but for PUT endpoints (e.g. merging an MR).
@@ -721,27 +568,10 @@ impl GitLabClient {
     where
         T: for<'de> Deserialize<'de>,
     {
-        let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .put(&url)
-            .send()
-            .await
-            .map_err(|source| GitLabError::Request {
-                url: url.clone(),
-                source,
-            })?
-            .error_for_status()
-            .map_err(|source| GitLabError::Status {
-                url: url.clone(),
-                status: source.status().map(|status| status.as_u16()),
-                source,
-            })?;
-
-        response
-            .json::<T>()
-            .await
-            .map_err(|source| GitLabError::Decode { url, source })
+        match &self.backend {
+            Backend::Http(client) => client.put_json(path).await,
+            Backend::Demo(_) => Err(GitLabError::DemoAction),
+        }
     }
 
     #[instrument(skip(self))]
@@ -822,35 +652,10 @@ impl GitLabClient {
     /// Returns an error if the request fails, GitLab returns a non-success status, or the body
     /// cannot be read.
     pub async fn get_job_trace(&self, project_id: u64, job_id: u64) -> Result<String> {
-        let url = format!(
-            "{}/api/v4/projects/{project_id}/jobs/{job_id}/trace",
-            self.base_url
-        );
-        let response = self
-            .client
-            .get(&url)
-            // Ask for only the tail we keep, so a huge log isn't downloaded in full just to be
-            // truncated. Servers that ignore Range return the whole body; truncate_trace_tail then
-            // trims it as before.
-            .header("Range", format!("bytes=-{MAX_TRACE_BYTES}"))
-            .send()
-            .await
-            .map_err(|source| GitLabError::Request {
-                url: url.clone(),
-                source,
-            })?
-            .error_for_status()
-            .map_err(|source| GitLabError::Status {
-                url: url.clone(),
-                status: source.status().map(|status| status.as_u16()),
-                source,
-            })?;
-
-        let text = response
-            .text()
-            .await
-            .map_err(|source| GitLabError::Decode { url, source })?;
-        Ok(truncate_trace_tail(text, MAX_TRACE_BYTES))
+        match &self.backend {
+            Backend::Http(client) => client.get_job_trace(project_id, job_id).await,
+            Backend::Demo(client) => client.trace(project_id, job_id),
+        }
     }
 
     #[instrument(skip(self))]
@@ -901,8 +706,12 @@ fn parse_next_page_header(value: &str) -> Option<&str> {
 }
 
 fn next_page_from_headers(headers: &reqwest::header::HeaderMap) -> Result<Option<String>> {
-    let Some(value) = headers.get("x-next-page") else { return Ok(None); };
-    let value = value.to_str().map_err(|_| GitLabError::Pagination { reason: "non-ASCII x-next-page" })?;
+    let Some(value) = headers.get("x-next-page") else {
+        return Ok(None);
+    };
+    let value = value.to_str().map_err(|_| GitLabError::Pagination {
+        reason: "non-ASCII x-next-page",
+    })?;
     Ok(parse_next_page_header(value).map(ToOwned::to_owned))
 }
 
@@ -1341,7 +1150,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-next-page", HeaderValue::from_static(" 7 "));
 
-        assert_eq!(next_page_from_headers(&headers).expect("header"), Some(String::from("7")));
+        assert_eq!(
+            next_page_from_headers(&headers).expect("header"),
+            Some(String::from("7"))
+        );
     }
 
     #[tokio::test]
@@ -1602,7 +1414,10 @@ mod tests {
 
         let client = super::GitLabClient::new(server.base_url(), "token", None).expect("client");
         client.approve_merge_request(7, 5).await.expect("approve");
-        client.merge_merge_request(7, 5, "reviewed-sha").await.expect("merge");
+        client
+            .merge_merge_request(7, 5, "reviewed-sha")
+            .await
+            .expect("merge");
 
         approve.assert_async().await;
         merge.assert_async().await;
@@ -2005,7 +1820,8 @@ mod tests {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/user")
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/user")
                     .header("user-agent", concat!("invocra/", env!("CARGO_PKG_VERSION")));
                 then.status(200)
                     .json_body(serde_json::json!({"id": 1, "username": "alex"}));
@@ -2078,11 +1894,16 @@ mod tests {
     #[tokio::test]
     async fn get_pipeline_uses_the_requested_project_and_pipeline() {
         let server = httpmock::MockServer::start_async().await;
-        let request = server.mock_async(|when, then| {
-            when.method(httpmock::Method::GET).path("/api/v4/projects/8/pipelines/500");
-            then.status(200).json_body(serde_json::json!({"id":500,"status":"canceled","ref":"feature"}));
-        }).await;
-        let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+        let request = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/8/pipelines/500");
+                then.status(200)
+                    .json_body(serde_json::json!({"id":500,"status":"canceled","ref":"feature"}));
+            })
+            .await;
+        let client =
+            super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
         let pipeline = client.get_pipeline(8, 500).await.expect("get pipeline");
         request.assert_async().await;
         assert_eq!(pipeline.status, super::CiStatus::Canceled);
@@ -2091,59 +1912,109 @@ mod tests {
     #[tokio::test]
     async fn merge_rejects_changed_source_sha_without_retry() {
         let server = httpmock::MockServer::start_async().await;
-        let request = server.mock_async(|when, then| {
-            when.method(httpmock::Method::PUT).path("/api/v4/projects/7/merge_requests/5/merge")
-                .query_param("sha", "reviewed-sha");
-            then.status(409).json_body(serde_json::json!({"message":"SHA does not match HEAD"}));
-        }).await;
-        let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
-        let err = client.merge_merge_request(7, 5, "reviewed-sha").await.expect_err("source changed");
+        let request = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::PUT)
+                    .path("/api/v4/projects/7/merge_requests/5/merge")
+                    .query_param("sha", "reviewed-sha");
+                then.status(409)
+                    .json_body(serde_json::json!({"message":"SHA does not match HEAD"}));
+            })
+            .await;
+        let client =
+            super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+        let err = client
+            .merge_merge_request(7, 5, "reviewed-sha")
+            .await
+            .expect_err("source changed");
         request.assert_async().await;
         assert_eq!(err.http_status(), Some(409));
     }
 
     #[test]
     fn artifacts_token_is_sent_only_to_the_original_origin() {
-        let origin = reqwest::Url::parse("https://git.example/api/v4/projects/7/jobs/9/artifacts").expect("url");
-        let client = super::GitLabClient::new("https://git.example", "test-token", None).expect("client");
-        let same = client.artifacts_request(&origin, &origin).build().expect("same origin request");
-        assert_eq!(same.headers().get("PRIVATE-TOKEN").expect("token"), "test-token");
-        let cdn = reqwest::Url::parse("https://cdn.example/archive.zip?signature=secret").expect("url");
-        let foreign = client.artifacts_request(&cdn, &origin).build().expect("cdn request");
+        let origin = reqwest::Url::parse("https://git.example/api/v4/projects/7/jobs/9/artifacts")
+            .expect("url");
+        let client = super::http::HttpClient::new("https://git.example", "test-token", None)
+            .expect("client");
+        let same = client
+            .artifacts_request(&origin, &origin)
+            .build()
+            .expect("same origin request");
+        assert_eq!(
+            same.headers().get("PRIVATE-TOKEN").expect("token"),
+            "test-token"
+        );
+        let cdn =
+            reqwest::Url::parse("https://cdn.example/archive.zip?signature=secret").expect("url");
+        let foreign = client
+            .artifacts_request(&cdn, &origin)
+            .build()
+            .expect("cdn request");
         assert!(!foreign.headers().contains_key("PRIVATE-TOKEN"));
     }
 
     #[tokio::test]
     async fn artifacts_follow_same_origin_redirect_and_save_the_archive() {
         let server = httpmock::MockServer::start_async().await;
-        server.mock_async(|when, then| {
-            when.method(httpmock::Method::GET).path("/api/v4/projects/7/jobs/9/artifacts");
-            then.status(302).header("Location", "/archive.zip").body("redirect body");
-        }).await;
-        let archive = server.mock_async(|when, then| {
-            when.method(httpmock::Method::GET).path("/archive.zip").header("PRIVATE-TOKEN", "test-token");
-            then.status(200).body("PK-archive");
-        }).await;
-        let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
-        let dir = tempfile::tempdir().expect("tempdir"); let dest = dir.path().join("archive.zip");
-        assert_eq!(client.download_job_artifacts(7, 9, &dest).await.expect("archive"), 10);
+        server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/api/v4/projects/7/jobs/9/artifacts");
+                then.status(302)
+                    .header("Location", "/archive.zip")
+                    .body("redirect body");
+            })
+            .await;
+        let archive = server
+            .mock_async(|when, then| {
+                when.method(httpmock::Method::GET)
+                    .path("/archive.zip")
+                    .header("PRIVATE-TOKEN", "test-token");
+                then.status(200).body("PK-archive");
+            })
+            .await;
+        let client =
+            super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dest = dir.path().join("archive.zip");
+        assert_eq!(
+            client
+                .download_job_artifacts(7, 9, &dest)
+                .await
+                .expect("archive"),
+            10
+        );
         archive.assert_async().await;
         assert_eq!(std::fs::read(dest).expect("archive file"), b"PK-archive");
     }
 
     #[tokio::test]
     async fn unsafe_or_looping_artifact_redirect_preserves_existing_file() {
-        for location in ["http://unrelated.example/archive.zip", "/api/v4/projects/7/jobs/9/artifacts"] {
+        for location in [
+            "http://unrelated.example/archive.zip",
+            "/api/v4/projects/7/jobs/9/artifacts",
+        ] {
             let server = httpmock::MockServer::start_async().await;
-            server.mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/projects/7/jobs/9/artifacts");
-                then.status(302).header("Location", location).body("redirect body");
-            }).await;
-            let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
-            let dir = tempfile::tempdir().expect("tempdir"); let dest = dir.path().join("archive.zip");
+            server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET)
+                        .path("/api/v4/projects/7/jobs/9/artifacts");
+                    then.status(302)
+                        .header("Location", location)
+                        .body("redirect body");
+                })
+                .await;
+            let client =
+                super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+            let dir = tempfile::tempdir().expect("tempdir");
+            let dest = dir.path().join("archive.zip");
             std::fs::write(&dest, "original archive").expect("seed");
             assert!(client.download_job_artifacts(7, 9, &dest).await.is_err());
-            assert_eq!(std::fs::read_to_string(dest).expect("old archive"), "original archive");
+            assert_eq!(
+                std::fs::read_to_string(dest).expect("old archive"),
+                "original archive"
+            );
         }
     }
 
@@ -2152,22 +2023,49 @@ mod tests {
         for route in ["jobs", "bridges"] {
             let server = httpmock::MockServer::start_async().await;
             let path = format!("/api/v4/projects/7/pipelines/9/{route}");
-            let first = server.mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path(&path).query_param("page", "1").query_param("per_page", "100");
-                then.status(200).header("x-next-page", "2")
-                    .json_body(serde_json::json!([{"id":1,"name":"first","status":"success"}]));
-            }).await;
-            let second = server.mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path(&path).query_param("page", "2");
-                then.status(200).json_body(serde_json::json!([{"id":2,"name":"second","status":"success"}]));
-            }).await;
-            let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+            let first = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET)
+                        .path(&path)
+                        .query_param("page", "1")
+                        .query_param("per_page", "100");
+                    then.status(200)
+                        .header("x-next-page", "2")
+                        .json_body(serde_json::json!([{"id":1,"name":"first","status":"success"}]));
+                })
+                .await;
+            let second = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET)
+                        .path(&path)
+                        .query_param("page", "2");
+                    then.status(200).json_body(
+                        serde_json::json!([{"id":2,"name":"second","status":"success"}]),
+                    );
+                })
+                .await;
+            let client =
+                super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
             let ids: Vec<u64> = if route == "jobs" {
-                client.get_pipeline_jobs(7, 9).await.expect("jobs").into_iter().map(|job| job.id).collect()
+                client
+                    .get_pipeline_jobs(7, 9)
+                    .await
+                    .expect("jobs")
+                    .into_iter()
+                    .map(|job| job.id)
+                    .collect()
             } else {
-                client.get_pipeline_bridges(7, 9).await.expect("bridges").into_iter().map(|job| job.id).collect()
+                client
+                    .get_pipeline_bridges(7, 9)
+                    .await
+                    .expect("bridges")
+                    .into_iter()
+                    .map(|job| job.id)
+                    .collect()
             };
-            assert_eq!(ids, [1, 2]); first.assert_async().await; second.assert_async().await;
+            assert_eq!(ids, [1, 2]);
+            first.assert_async().await;
+            second.assert_async().await;
         }
     }
 
@@ -2175,12 +2073,20 @@ mod tests {
     async fn pagination_rejects_nonadvancing_page_without_repeating_request() {
         for next in ["0", "1"] {
             let server = httpmock::MockServer::start_async().await;
-            let request = server.mock_async(|when, then| {
-                when.method(httpmock::Method::GET).path("/api/v4/projects");
-                then.status(200).header("x-next-page", next).json_body(serde_json::json!([]));
-            }).await;
-            let client = super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
-            assert!(matches!(client.list_projects().await, Err(super::GitLabError::Pagination { .. })));
+            let request = server
+                .mock_async(|when, then| {
+                    when.method(httpmock::Method::GET).path("/api/v4/projects");
+                    then.status(200)
+                        .header("x-next-page", next)
+                        .json_body(serde_json::json!([]));
+                })
+                .await;
+            let client =
+                super::GitLabClient::new(server.base_url(), "test-token", None).expect("client");
+            assert!(matches!(
+                client.list_projects().await,
+                Err(super::GitLabError::Pagination { .. })
+            ));
             request.assert_calls_async(1).await;
         }
     }
@@ -2188,8 +2094,10 @@ mod tests {
     #[test]
     fn invalid_pagination_header_is_not_treated_as_end_of_list() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-next-page", HeaderValue::from_bytes(&[255]).expect("header bytes"));
+        headers.insert(
+            "x-next-page",
+            HeaderValue::from_bytes(&[255]).expect("header bytes"),
+        );
         assert!(next_page_from_headers(&headers).is_err());
     }
-
 }

@@ -1,0 +1,317 @@
+[
+  {
+    "project": {"id": 1, "name": "payments-api", "path_with_namespace": "acme/payments-api", "default_branch": "main", "web_url": "https://demo.gitlab.example/acme/payments-api"},
+    "branches": [
+      {"name": "main", "default": true},
+      {"name": "feature/idempotent-retries", "default": false},
+      {"name": "release/1.5", "default": false}
+    ],
+    "pipelines": [
+      {"id": 105, "iid": 105, "status": "failed", "ref": "main", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/105", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 1050, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1050", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 1051, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1051", "artifacts_file": null},
+        {"id": 1052, "name": "integration:postgres", "status": "failed", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1052", "artifacts_file": null},
+        {"id": 1053, "name": "deploy:staging", "status": "skipped", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1053", "artifacts_file": null},
+        {"id": 1054, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1054", "artifacts_file": null}
+      ]},
+      {"id": 104, "iid": 104, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/104", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 1040, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1040", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 1041, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1041", "artifacts_file": null},
+        {"id": 1042, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1042", "artifacts_file": null},
+        {"id": 1043, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1043", "artifacts_file": null},
+        {"id": 1044, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1044", "artifacts_file": null}
+      ]},
+      {"id": 103, "iid": 103, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/103", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 1030, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1030", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 1031, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1031", "artifacts_file": null},
+        {"id": 1032, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1032", "artifacts_file": null},
+        {"id": 1033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1033", "artifacts_file": null},
+        {"id": 1034, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1034", "artifacts_file": null}
+      ]},
+      {"id": 102, "iid": 102, "status": "success", "ref": "v1.4.0", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/102", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 1020, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1020", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 1021, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1021", "artifacts_file": null},
+        {"id": 1022, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1022", "artifacts_file": null},
+        {"id": 1023, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1023", "artifacts_file": null},
+        {"id": 1024, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1024", "artifacts_file": null}
+      ]},
+      {"id": 101, "iid": 101, "status": "success", "ref": "v1.3.0", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/101", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 1010, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1010", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 1011, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1011", "artifacts_file": null},
+        {"id": 1012, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1012", "artifacts_file": null},
+        {"id": 1013, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1013", "artifacts_file": null},
+        {"id": 1014, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1014", "artifacts_file": null}
+      ]}
+    ],
+    "merge_requests": [
+      {"id": 1001, "iid": 1, "project_id": 1, "title": "Make payment retries idempotent", "author": {"username": "demo.alex"}, "source_branch": "feature/idempotent-retries", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/payments-api/-/merge_requests/1", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 104, "iid": 104, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/104", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 1002, "iid": 2, "project_id": 1, "title": "Release 1.5: checkout improvements", "author": {"username": "demo.sam"}, "source_branch": "release/1.5", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/payments-api/-/merge_requests/2", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 103, "iid": 103, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/103", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 1003, "iid": 3, "project_id": 1, "title": "Draft: add request tracing", "author": {"username": "demo.robin"}, "source_branch": "feature/request-tracing", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": true, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/payments-api/-/merge_requests/3", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 103, "iid": 103, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/payments-api/-/pipelines/103", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}}
+    ],
+    "environments": [
+      {"id": 1, "name": "staging", "state": "available", "external_url": "https://staging.payments-api.example", "last_deployment": {"status": "success", "ref": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 1033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1033", "artifacts_file": null}}},
+      {"id": 2, "name": "production", "state": "available", "external_url": "https://production.payments-api.example", "last_deployment": {"status": "success", "ref": "v1.4.0", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 1033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/payments-api/-/jobs/1033", "artifacts_file": null}}}
+    ],
+    "tags": [
+      {"name": "v1.4.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"},
+      {"name": "v1.3.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}
+    ],
+    "variables": [
+      {"key": "APP_ENV", "value": "staging", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"},
+      {"key": "DATABASE_URL", "value": "postgres://postgres.example/demo", "variable_type": "env_var", "protected": true, "masked": true, "environment_scope": "*"},
+      {"key": "RETRY_LIMIT", "value": "3", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"}
+    ]
+  },
+  {
+    "project": {"id": 2, "name": "web-store", "path_with_namespace": "acme/web-store", "default_branch": "main", "web_url": "https://demo.gitlab.example/acme/web-store"},
+    "branches": [
+      {"name": "main", "default": true},
+      {"name": "feature/idempotent-retries", "default": false},
+      {"name": "release/1.5", "default": false}
+    ],
+    "pipelines": [
+      {"id": 205, "iid": 205, "status": "success", "ref": "main", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/205", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 2050, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2050", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 2051, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2051", "artifacts_file": null},
+        {"id": 2052, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2052", "artifacts_file": null},
+        {"id": 2053, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2053", "artifacts_file": null},
+        {"id": 2054, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2054", "artifacts_file": null}
+      ]},
+      {"id": 204, "iid": 204, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/204", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 2040, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2040", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 2041, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2041", "artifacts_file": null},
+        {"id": 2042, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2042", "artifacts_file": null},
+        {"id": 2043, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2043", "artifacts_file": null},
+        {"id": 2044, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2044", "artifacts_file": null}
+      ]},
+      {"id": 203, "iid": 203, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/203", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 2030, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2030", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 2031, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2031", "artifacts_file": null},
+        {"id": 2032, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2032", "artifacts_file": null},
+        {"id": 2033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2033", "artifacts_file": null},
+        {"id": 2034, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2034", "artifacts_file": null}
+      ]},
+      {"id": 202, "iid": 202, "status": "success", "ref": "v1.4.0", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/202", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 2020, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2020", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 2021, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2021", "artifacts_file": null},
+        {"id": 2022, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2022", "artifacts_file": null},
+        {"id": 2023, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2023", "artifacts_file": null},
+        {"id": 2024, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2024", "artifacts_file": null}
+      ]},
+      {"id": 201, "iid": 201, "status": "success", "ref": "v1.3.0", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/201", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 2010, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2010", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 2011, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2011", "artifacts_file": null},
+        {"id": 2012, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2012", "artifacts_file": null},
+        {"id": 2013, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2013", "artifacts_file": null},
+        {"id": 2014, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2014", "artifacts_file": null}
+      ]}
+    ],
+    "merge_requests": [
+      {"id": 2001, "iid": 1, "project_id": 2, "title": "Make payment retries idempotent", "author": {"username": "demo.alex"}, "source_branch": "feature/idempotent-retries", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/web-store/-/merge_requests/1", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 204, "iid": 204, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/204", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 2002, "iid": 2, "project_id": 2, "title": "Release 1.5: checkout improvements", "author": {"username": "demo.sam"}, "source_branch": "release/1.5", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/web-store/-/merge_requests/2", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 203, "iid": 203, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/203", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 2003, "iid": 3, "project_id": 2, "title": "Draft: add request tracing", "author": {"username": "demo.robin"}, "source_branch": "feature/request-tracing", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": true, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/web-store/-/merge_requests/3", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 203, "iid": 203, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/web-store/-/pipelines/203", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}}
+    ],
+    "environments": [
+      {"id": 1, "name": "staging", "state": "available", "external_url": "https://staging.web-store.example", "last_deployment": {"status": "success", "ref": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 2033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2033", "artifacts_file": null}}},
+      {"id": 2, "name": "production", "state": "available", "external_url": "https://production.web-store.example", "last_deployment": {"status": "success", "ref": "v1.4.0", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 2033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/web-store/-/jobs/2033", "artifacts_file": null}}}
+    ],
+    "tags": [
+      {"name": "v1.4.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"},
+      {"name": "v1.3.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}
+    ],
+    "variables": [
+      {"key": "APP_ENV", "value": "staging", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"},
+      {"key": "DATABASE_URL", "value": "postgres://postgres.example/demo", "variable_type": "env_var", "protected": true, "masked": true, "environment_scope": "*"},
+      {"key": "RETRY_LIMIT", "value": "3", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"}
+    ]
+  },
+  {
+    "project": {"id": 3, "name": "worker", "path_with_namespace": "acme/worker", "default_branch": "main", "web_url": "https://demo.gitlab.example/acme/worker"},
+    "branches": [
+      {"name": "main", "default": true},
+      {"name": "feature/idempotent-retries", "default": false},
+      {"name": "release/1.5", "default": false}
+    ],
+    "pipelines": [
+      {"id": 305, "iid": 305, "status": "running", "ref": "main", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/305", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 3050, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3050", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 3051, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3051", "artifacts_file": null},
+        {"id": 3052, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3052", "artifacts_file": null},
+        {"id": 3053, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3053", "artifacts_file": null},
+        {"id": 3054, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3054", "artifacts_file": null}
+      ]},
+      {"id": 304, "iid": 304, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/304", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 3040, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3040", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 3041, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3041", "artifacts_file": null},
+        {"id": 3042, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3042", "artifacts_file": null},
+        {"id": 3043, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3043", "artifacts_file": null},
+        {"id": 3044, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3044", "artifacts_file": null}
+      ]},
+      {"id": 303, "iid": 303, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/303", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 3030, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3030", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 3031, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3031", "artifacts_file": null},
+        {"id": 3032, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3032", "artifacts_file": null},
+        {"id": 3033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3033", "artifacts_file": null},
+        {"id": 3034, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3034", "artifacts_file": null}
+      ]},
+      {"id": 302, "iid": 302, "status": "success", "ref": "v1.4.0", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/302", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 3020, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3020", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 3021, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3021", "artifacts_file": null},
+        {"id": 3022, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3022", "artifacts_file": null},
+        {"id": 3023, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3023", "artifacts_file": null},
+        {"id": 3024, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3024", "artifacts_file": null}
+      ]},
+      {"id": 301, "iid": 301, "status": "success", "ref": "v1.3.0", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/301", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 3010, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3010", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 3011, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3011", "artifacts_file": null},
+        {"id": 3012, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3012", "artifacts_file": null},
+        {"id": 3013, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3013", "artifacts_file": null},
+        {"id": 3014, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3014", "artifacts_file": null}
+      ]}
+    ],
+    "merge_requests": [
+      {"id": 3001, "iid": 1, "project_id": 3, "title": "Make payment retries idempotent", "author": {"username": "demo.alex"}, "source_branch": "feature/idempotent-retries", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/worker/-/merge_requests/1", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 304, "iid": 304, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/304", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 3002, "iid": 2, "project_id": 3, "title": "Release 1.5: checkout improvements", "author": {"username": "demo.sam"}, "source_branch": "release/1.5", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/worker/-/merge_requests/2", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 303, "iid": 303, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/303", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 3003, "iid": 3, "project_id": 3, "title": "Draft: add request tracing", "author": {"username": "demo.robin"}, "source_branch": "feature/request-tracing", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": true, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/acme/worker/-/merge_requests/3", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 303, "iid": 303, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/acme/worker/-/pipelines/303", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}}
+    ],
+    "environments": [
+      {"id": 1, "name": "staging", "state": "available", "external_url": "https://staging.worker.example", "last_deployment": {"status": "success", "ref": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 3033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3033", "artifacts_file": null}}},
+      {"id": 2, "name": "production", "state": "available", "external_url": "https://production.worker.example", "last_deployment": {"status": "success", "ref": "v1.4.0", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 3033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/acme/worker/-/jobs/3033", "artifacts_file": null}}}
+    ],
+    "tags": [
+      {"name": "v1.4.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"},
+      {"name": "v1.3.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}
+    ],
+    "variables": [
+      {"key": "APP_ENV", "value": "staging", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"},
+      {"key": "DATABASE_URL", "value": "postgres://postgres.example/demo", "variable_type": "env_var", "protected": true, "masked": true, "environment_scope": "*"},
+      {"key": "RETRY_LIMIT", "value": "3", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"}
+    ]
+  },
+  {
+    "project": {"id": 4, "name": "infrastructure", "path_with_namespace": "platform/infrastructure", "default_branch": "main", "web_url": "https://demo.gitlab.example/platform/infrastructure"},
+    "branches": [
+      {"name": "main", "default": true},
+      {"name": "feature/idempotent-retries", "default": false},
+      {"name": "release/1.5", "default": false}
+    ],
+    "pipelines": [
+      {"id": 405, "iid": 405, "status": "manual", "ref": "main", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/405", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 4050, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4050", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 4051, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4051", "artifacts_file": null},
+        {"id": 4052, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4052", "artifacts_file": null},
+        {"id": 4053, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4053", "artifacts_file": null},
+        {"id": 4054, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4054", "artifacts_file": null}
+      ]},
+      {"id": 404, "iid": 404, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/404", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 4040, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4040", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 4041, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4041", "artifacts_file": null},
+        {"id": 4042, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4042", "artifacts_file": null},
+        {"id": 4043, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4043", "artifacts_file": null},
+        {"id": 4044, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4044", "artifacts_file": null}
+      ]},
+      {"id": 403, "iid": 403, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/403", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 4030, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4030", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 4031, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4031", "artifacts_file": null},
+        {"id": 4032, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4032", "artifacts_file": null},
+        {"id": 4033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4033", "artifacts_file": null},
+        {"id": 4034, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4034", "artifacts_file": null}
+      ]},
+      {"id": 402, "iid": 402, "status": "success", "ref": "v1.4.0", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/402", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 4020, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4020", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 4021, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4021", "artifacts_file": null},
+        {"id": 4022, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4022", "artifacts_file": null},
+        {"id": 4023, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4023", "artifacts_file": null},
+        {"id": 4024, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4024", "artifacts_file": null}
+      ]},
+      {"id": 401, "iid": 401, "status": "success", "ref": "v1.3.0", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/401", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 4010, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4010", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 4011, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4011", "artifacts_file": null},
+        {"id": 4012, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4012", "artifacts_file": null},
+        {"id": 4013, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4013", "artifacts_file": null},
+        {"id": 4014, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4014", "artifacts_file": null}
+      ]}
+    ],
+    "merge_requests": [
+      {"id": 4001, "iid": 1, "project_id": 4, "title": "Make payment retries idempotent", "author": {"username": "demo.alex"}, "source_branch": "feature/idempotent-retries", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/merge_requests/1", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 404, "iid": 404, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/404", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 4002, "iid": 2, "project_id": 4, "title": "Release 1.5: checkout improvements", "author": {"username": "demo.sam"}, "source_branch": "release/1.5", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/merge_requests/2", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 403, "iid": 403, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/403", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 4003, "iid": 3, "project_id": 4, "title": "Draft: add request tracing", "author": {"username": "demo.robin"}, "source_branch": "feature/request-tracing", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": true, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/merge_requests/3", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 403, "iid": 403, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/infrastructure/-/pipelines/403", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}}
+    ],
+    "environments": [
+      {"id": 1, "name": "staging", "state": "available", "external_url": "https://staging.infrastructure.example", "last_deployment": {"status": "success", "ref": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 4033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4033", "artifacts_file": null}}},
+      {"id": 2, "name": "production", "state": "available", "external_url": "https://production.infrastructure.example", "last_deployment": {"status": "success", "ref": "v1.4.0", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 4033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/infrastructure/-/jobs/4033", "artifacts_file": null}}}
+    ],
+    "tags": [
+      {"name": "v1.4.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"},
+      {"name": "v1.3.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}
+    ],
+    "variables": [
+      {"key": "APP_ENV", "value": "staging", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"},
+      {"key": "DATABASE_URL", "value": "postgres://postgres.example/demo", "variable_type": "env_var", "protected": true, "masked": true, "environment_scope": "*"},
+      {"key": "RETRY_LIMIT", "value": "3", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"}
+    ]
+  },
+  {
+    "project": {"id": 5, "name": "observability", "path_with_namespace": "platform/observability", "default_branch": "main", "web_url": "https://demo.gitlab.example/platform/observability"},
+    "branches": [
+      {"name": "main", "default": true},
+      {"name": "feature/idempotent-retries", "default": false},
+      {"name": "release/1.5", "default": false}
+    ],
+    "pipelines": [
+      {"id": 505, "iid": 505, "status": "success", "ref": "main", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/505", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 5050, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5050", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 5051, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5051", "artifacts_file": null},
+        {"id": 5052, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5052", "artifacts_file": null},
+        {"id": 5053, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5053", "artifacts_file": null},
+        {"id": 5054, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5054", "artifacts_file": null}
+      ]},
+      {"id": 504, "iid": 504, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/504", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 5040, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5040", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 5041, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5041", "artifacts_file": null},
+        {"id": 5042, "name": "integration:postgres", "status": "running", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5042", "artifacts_file": null},
+        {"id": 5043, "name": "deploy:staging", "status": "pending", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5043", "artifacts_file": null},
+        {"id": 5044, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5044", "artifacts_file": null}
+      ]},
+      {"id": 503, "iid": 503, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/503", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 5030, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5030", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 5031, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5031", "artifacts_file": null},
+        {"id": 5032, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5032", "artifacts_file": null},
+        {"id": 5033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5033", "artifacts_file": null},
+        {"id": 5034, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5034", "artifacts_file": null}
+      ]},
+      {"id": 502, "iid": 502, "status": "success", "ref": "v1.4.0", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/502", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 5020, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5020", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 5021, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5021", "artifacts_file": null},
+        {"id": 5022, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5022", "artifacts_file": null},
+        {"id": 5023, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5023", "artifacts_file": null},
+        {"id": 5024, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5024", "artifacts_file": null}
+      ]},
+      {"id": 501, "iid": 501, "status": "success", "ref": "v1.3.0", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/501", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "jobs": [
+        {"id": 5010, "name": "cargo:build", "status": "success", "stage": "build", "duration": 42.6, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5010", "artifacts_file": {"filename": "artifacts.zip", "size": 245760}},
+        {"id": 5011, "name": "unit-tests", "status": "success", "stage": "test", "duration": 18.3, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5011", "artifacts_file": null},
+        {"id": 5012, "name": "integration:postgres", "status": "success", "stage": "test", "duration": 31.2, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5012", "artifacts_file": null},
+        {"id": 5013, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5013", "artifacts_file": null},
+        {"id": 5014, "name": "deploy:production", "status": "manual", "stage": "deploy", "duration": 0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5014", "artifacts_file": null}
+      ]}
+    ],
+    "merge_requests": [
+      {"id": 5001, "iid": 1, "project_id": 5, "title": "Make payment retries idempotent", "author": {"username": "demo.alex"}, "source_branch": "feature/idempotent-retries", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/observability/-/merge_requests/1", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 504, "iid": 504, "status": "running", "ref": "feature/idempotent-retries", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/504", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 5002, "iid": 2, "project_id": 5, "title": "Release 1.5: checkout improvements", "author": {"username": "demo.sam"}, "source_branch": "release/1.5", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": false, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/observability/-/merge_requests/2", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 503, "iid": 503, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/503", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}},
+      {"id": 5003, "iid": 3, "project_id": 5, "title": "Draft: add request tracing", "author": {"username": "demo.robin"}, "source_branch": "feature/request-tracing", "target_branch": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "state": "opened", "draft": true, "has_conflicts": false, "detailed_merge_status": "mergeable", "web_url": "https://demo.gitlab.example/platform/observability/-/merge_requests/3", "updated_at": "2026-10-28T09:42:00Z", "head_pipeline": {"id": 503, "iid": 503, "status": "success", "ref": "release/1.5", "web_url": "https://demo.gitlab.example/platform/observability/-/pipelines/503", "duration": 104, "created_at": "2026-10-28T09:41:00Z", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}}
+    ],
+    "environments": [
+      {"id": 1, "name": "staging", "state": "available", "external_url": "https://staging.observability.example", "last_deployment": {"status": "success", "ref": "main", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 5033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5033", "artifacts_file": null}}},
+      {"id": 2, "name": "production", "state": "available", "external_url": "https://production.observability.example", "last_deployment": {"status": "success", "ref": "v1.4.0", "sha": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95", "created_at": "2026-10-28T08:30:00Z", "deployable": {"id": 5033, "name": "deploy:staging", "status": "success", "stage": "deploy", "duration": 12.0, "web_url": "https://demo.gitlab.example/platform/observability/-/jobs/5033", "artifacts_file": null}}}
+    ],
+    "tags": [
+      {"name": "v1.4.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"},
+      {"name": "v1.3.0", "message": "Demo release", "target": "a7e91f3c82d04b56e1139fbac77e0c4b62d83a95"}
+    ],
+    "variables": [
+      {"key": "APP_ENV", "value": "staging", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"},
+      {"key": "DATABASE_URL", "value": "postgres://postgres.example/demo", "variable_type": "env_var", "protected": true, "masked": true, "environment_scope": "*"},
+      {"key": "RETRY_LIMIT", "value": "3", "variable_type": "env_var", "protected": false, "masked": false, "environment_scope": "*"}
+    ]
+  }
+]

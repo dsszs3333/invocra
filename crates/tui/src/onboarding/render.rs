@@ -32,10 +32,12 @@ fn render_field(frame: &mut Frame, state: &OnboardingState, label: &str, value: 
     let screen = frame.area();
     let form_height = 11;
     let art_height = if screen.width >= invocra::ART_WIDTH
-        && screen.height > invocra::ART_HEIGHT + form_height {
+        && screen.height > invocra::ART_HEIGHT + form_height
+    {
         invocra::ART_HEIGHT
     } else if screen.width >= invocra::WORDMARK_WIDTH
-        && screen.height > invocra::WORDMARK_HEIGHT + form_height {
+        && screen.height > invocra::WORDMARK_HEIGHT + form_height
+    {
         invocra::WORDMARK_HEIGHT
     } else {
         1
@@ -159,9 +161,19 @@ mod tests {
     #[test]
     fn startup_keeps_the_form_below_the_art_and_uses_a_compact_header_when_it_cannot_fit() {
         let state = OnboardingState::new("https://gitlab.com".into());
-        for (width, height, art_height) in [(120, 36, 13), (85, 25, 13), (84, 25, 4), (85, 24, 4), (84, 16, 4), (84, 15, 1), (27, 16, 1)] {
+        for (width, height, art_height) in [
+            (120, 36, 13),
+            (85, 25, 13),
+            (84, 25, 4),
+            (85, 24, 4),
+            (84, 16, 4),
+            (84, 15, 1),
+            (27, 16, 1),
+        ] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
-            terminal.draw(|frame| render(frame, &state)).expect("draw startup");
+            terminal
+                .draw(|frame| render(frame, &state))
+                .expect("draw startup");
             let buffer = terminal.backend().buffer();
             let rows: Vec<String> = (0..height)
                 .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
@@ -175,17 +187,27 @@ mod tests {
                 let (art, art_width) = if art_height == 13 {
                     (include_str!("../render/invocra.txt"), invocra::ART_WIDTH)
                 } else {
-                    (include_str!("../render/invocra-wordmark.txt"), invocra::WORDMARK_WIDTH)
+                    (
+                        include_str!("../render/invocra-wordmark.txt"),
+                        invocra::WORDMARK_WIDTH,
+                    )
                 };
                 let top = usize::from((height - art_height - 12) / 2);
                 let left = usize::from((width - art_width) / 2);
                 for (y, line) in art.lines().enumerate() {
-                    let actual: String = rows[top + y].chars().skip(left).take(usize::from(art_width)).collect();
+                    let actual: String = rows[top + y]
+                        .chars()
+                        .skip(left)
+                        .take(usize::from(art_width))
+                        .collect();
                     assert_eq!(actual, line, "startup artwork row {y}");
                 }
             } else {
                 assert!(rows.iter().any(|row| row.trim() == "Invocra"));
-                assert!(!rows.iter().flat_map(|row| row.chars()).any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch)));
+                assert!(!rows
+                    .iter()
+                    .flat_map(|row| row.chars())
+                    .any(|ch| ('\u{2800}'..='\u{28ff}').contains(&ch)));
             }
         }
     }

@@ -48,19 +48,7 @@ pub(super) fn render(frame: &mut Frame, area: Rect, state: &AppState) {
     let (filter_area, table_area) = table_layout(inner, show_filter);
 
     if let Some(filter_area) = filter_area {
-        let cursor = if state.branch_search.active {
-            "▏"
-        } else {
-            ""
-        };
-        let line = Line::from(vec![
-            Span::styled(
-                "Filter branch: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!("{}{cursor}", state.branch_search.query)),
-        ]);
-        frame.render_widget(Paragraph::new(line), filter_area);
+        render_filter(frame, filter_area, state);
     }
 
     let matching = state.visible_branches();
@@ -122,6 +110,23 @@ pub(super) fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         usize::from(table_area.height),
         state.selected_branch,
     );
+}
+
+/// Renders the branch filter and its input cursor.
+fn render_filter(frame: &mut Frame, filter_area: Rect, state: &AppState) {
+    let cursor = if state.branch_search.active {
+        "▏"
+    } else {
+        ""
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            "Filter branch: ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!("{}{cursor}", state.branch_search.query)),
+    ]);
+    frame.render_widget(Paragraph::new(line), filter_area);
 }
 
 /// Splits the panel interior into the optional filter line and the branch table area.

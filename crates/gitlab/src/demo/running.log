@@ -1,0 +1,11 @@
+[0KRunning with gitlab-runner 18.4.0 (demo)
+section_start:1793180462:step_script[0K[36;1mExecuting integration tests[0m
+[32;1m$ cargo test --test payments -- --nocapture[0m
+Connecting to postgres:5432 ... ready
+Applying database migrations ... done
+running 4 tests
+test create_payment_returns_receipt ... [32mok[0m
+test rejects_invalid_currency ... [32mok[0m
+test refunds_preserve_audit_trail ... [32mok[0m
+test duplicate_request_returns_original_receipt ... running
+Waiting for retry backoff (attempt 2/3) ...

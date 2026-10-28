@@ -14,6 +14,16 @@ use serde::Serialize;
 use crate::actions::Action;
 use crate::refresh::RefreshSources;
 
+/// Whole seconds of a GitLab job duration (reported as float seconds).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "`as` truncates the fraction and saturates negative, NaN and huge values, as wanted"
+)]
+pub(crate) const fn job_duration_secs(seconds: f64) -> u64 {
+    seconds as u64
+}
+
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub configured: ProjectEntry,
@@ -684,9 +694,16 @@ fn split_runner_header(line: &str) -> Option<(&str, &str)> {
     let time = timestamp.strip_suffix('Z')?;
     let seconds = time.get(..19)?;
     let fraction = time.get(19..)?;
-    let valid_seconds = seconds.bytes().zip(b"0000-00-00T00:00:00").all(|(actual, pattern)| {
-        if *pattern == b'0' { actual.is_ascii_digit() } else { actual == *pattern }
-    });
+    let valid_seconds = seconds
+        .bytes()
+        .zip(b"0000-00-00T00:00:00")
+        .all(|(actual, pattern)| {
+            if *pattern == b'0' {
+                actual.is_ascii_digit()
+            } else {
+                actual == *pattern
+            }
+        });
     if !valid_seconds
         || (!fraction.is_empty()
             && (!fraction.starts_with('.')
@@ -1367,8 +1384,11 @@ impl AppState {
     /// Project owning the pipeline displayed in the detail panel.
     pub(crate) fn active_pipeline_project_id(&self) -> Option<u64> {
         let item = self.selected_item()?;
-        Some(self.viewed_pipeline.get(&item.configured.id)
-            .map_or(item.configured.id, |view| view.project_id))
+        Some(
+            self.viewed_pipeline
+                .get(&item.configured.id)
+                .map_or(item.configured.id, |view| view.project_id),
+        )
     }
 
     /// Pipeline shown in the detail panel: the inspected historical one if any, else the latest.
@@ -1666,14 +1686,13 @@ impl AppState {
             CiStatus::Success | CiStatus::Failed | CiStatus::Canceled
         );
         match previous {
-            // First sighting: seed only, never notify (silences cold start / launch on finished).
-            None => None,
             Some(old) if old != new_status && terminal => Some(format!(
                 "Pipeline #{} {} in {}",
                 pipeline.iid.unwrap_or(pipeline.id),
                 new_status,
                 snapshot.configured.name
             )),
+            // First sighting and unchanged/nonterminal statuses never notify.
             _ => None,
         }
     }
@@ -1702,7 +1721,7 @@ impl AppState {
         for job in &snapshot.jobs {
             if job.status.is_active() {
                 if let Some(secs) = job.duration {
-                    anchor(job.id, secs as u64);
+                    anchor(job.id, job_duration_secs(secs));
                 }
             }
         }
@@ -1736,21 +1755,30 @@ impl AppState {
     /// and re-evaluates follow. Returns a trace fetch to issue when follow needs (re)starting —
     /// flipping `follow` alone does not re-arm the trace-follow loop. The user is never yanked out
     /// of scrollback: follow is only re-enabled while parked at the tail.
-    pub(crate) fn sync_open_log_with_snapshot(&mut self, project_id: u64) -> Option<TraceFetchRequest> {
+    pub(crate) fn sync_open_log_with_snapshot(
+        &mut self,
+        project_id: u64,
+    ) -> Option<TraceFetchRequest> {
         let view = self.log.as_ref()?;
         if view.project_id != project_id {
             return None;
         }
         let job_id = view.job_id;
         // Read the live status before borrowing `self.log` mutably.
-        let status = self.viewed_pipeline.values()
+        let status = self
+            .viewed_pipeline
+            .values()
             .filter(|pipeline| pipeline.project_id == project_id)
             .flat_map(|pipeline| &pipeline.jobs)
-            .chain(self.items.iter()
-                .filter(|item| item.configured.id == project_id)
-                .flat_map(|item| &item.jobs))
+            .chain(
+                self.items
+                    .iter()
+                    .filter(|item| item.configured.id == project_id)
+                    .flat_map(|item| &item.jobs),
+            )
             .find(|job| job.id == job_id)?
-            .status.clone();
+            .status
+            .clone();
 
         let view = self.log.as_mut()?;
         view.job_status = status.to_string();
@@ -1960,12 +1988,15 @@ mod tests {
             "2026-10-18T22:34:55.123456789Z 00O + literal plus, 00O stays in output\n",
         );
 
-        assert_eq!(sanitize_trace(raw), vec![
-            "2026-10-18T22:34:54.933928Z Running with gitlab-runner",
-            "2026-10-18T22:34:55Z ошибка: build failed",
-            "2026-10-18T22:34:55.1Z   indented continuation",
-            "2026-10-18T22:34:55.123456789Z + literal plus, 00O stays in output",
-        ]);
+        assert_eq!(
+            sanitize_trace(raw),
+            vec![
+                "2026-10-18T22:34:54.933928Z Running with gitlab-runner",
+                "2026-10-18T22:34:55Z ошибка: build failed",
+                "2026-10-18T22:34:55.1Z   indented continuation",
+                "2026-10-18T22:34:55.123456789Z + literal plus, 00O stays in output",
+            ]
+        );
     }
 
     #[test]
@@ -1978,11 +2009,14 @@ mod tests {
             "2026-10-18T22:34:56Z 01O downloading 50%\rdownloading 100%\n",
         );
 
-        assert_eq!(sanitize_trace(raw), vec![
-            "2026-10-18T22:34:54.934071Z Preparing the shell executor",
-            "2026-10-18T22:34:55Z $ cargo test",
-            "2026-10-18T22:34:56Z downloading 100%",
-        ]);
+        assert_eq!(
+            sanitize_trace(raw),
+            vec![
+                "2026-10-18T22:34:54.934071Z Preparing the shell executor",
+                "2026-10-18T22:34:55Z $ cargo test",
+                "2026-10-18T22:34:56Z downloading 100%",
+            ]
+        );
     }
 
     #[test]
@@ -2270,7 +2304,10 @@ mod tests {
         assert_eq!(state.items[0].jobs[0].id, 9);
 
         state.apply_project_auto_refresh(snapshot_with_status(1, "success"));
-        assert_eq!(state.items[0].pipeline.as_ref().unwrap().status.as_str(), "success");
+        assert_eq!(
+            state.items[0].pipeline.as_ref().unwrap().status.as_str(),
+            "success"
+        );
         assert!(!state.items[0].has_error());
         assert!(state.items[0].jobs.is_empty());
     }
@@ -2804,8 +2841,14 @@ mod tests {
         ]);
 
         // Every building branch is pinned...
-        assert_eq!(state.ref_overrides.get(&1).map(String::as_str), Some("feature/a"));
-        assert_eq!(state.ref_overrides.get(&2).map(String::as_str), Some("feature/b"));
+        assert_eq!(
+            state.ref_overrides.get(&1).map(String::as_str),
+            Some("feature/a")
+        );
+        assert_eq!(
+            state.ref_overrides.get(&2).map(String::as_str),
+            Some("feature/b")
+        );
         // ...and focus jumps to the newest one's branch panel.
         assert_eq!(state.selected_project_id, Some(2));
         assert_eq!(state.focus, super::Focus::Branches);

@@ -1,7 +1,7 @@
 pub(crate) mod branches_panel;
 pub(crate) mod detail_panel;
-pub(crate) mod invocra;
 mod help_bar;
+pub(crate) mod invocra;
 mod mr_panel;
 pub(crate) mod overlays;
 pub(crate) mod projects_panel;
@@ -35,7 +35,7 @@ fn accordion(area: Rect, count: usize, focused: Option<usize>) -> Vec<Rect> {
             })
             .collect(),
         None => (0..count)
-            .map(|_| Constraint::Ratio(1, count as u32))
+            .map(|_| Constraint::Ratio(1, u32::try_from(count).unwrap_or(u32::MAX)))
             .collect(),
     };
     Layout::default()

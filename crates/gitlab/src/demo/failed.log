@@ -1,0 +1,28 @@
+[0KRunning with gitlab-runner 18.4.0 (demo)
+  on demo-linux-small acme-runner
+section_start:1793180460:prepare_executor[0K[36;1mPreparing the docker executor[0m
+Using Docker executor with image rust:1.88 ...
+Starting service postgres:17 ...
+section_end:1793180461:prepare_executor[0K
+section_start:1793180462:step_script[0K[36;1mExecuting step_script stage[0m
+[32;1m$ cargo test --test payments -- --nocapture[0m
+   Compiling payments-api v1.5.0 (/builds/acme/payments-api)
+    Finished test profile [unoptimized + debuginfo] target(s) in 12.4s
+     Running tests/payments.rs
+running 4 tests
+test create_payment_returns_receipt ... [32mok[0m
+test rejects_invalid_currency ... [32mok[0m
+test refunds_preserve_audit_trail ... [32mok[0m
+test duplicate_request_returns_original_receipt ... [31mFAILED[0m
+
+thread 'duplicate_request_returns_original_receipt' panicked at tests/payments.rs:87:5:
+assertion `left == right` failed: idempotency key must reuse the original receipt
+  left: 201
+ right: 200
+
+[31mtest result: FAILED. 3 passed; 1 failed; 0 ignored[0m
+error: test failed, to rerun pass --test payments
+section_end:1793180493:step_script[0K
+Uploading artifacts for failed job
+JUnit report: test-results.xml (1 matching file)
+[31;1mERROR: Job failed: exit code 101[0m
