@@ -63,15 +63,15 @@ brew upgrade dsszs3333/tap/invocra
 
 ### Linux x86_64 release
 
-Download [v0.2.1](https://github.com/dsszs3333/invocra/releases/tag/v0.2.1), verify the checksum and install the binary:
+Download [v0.2.2](https://github.com/dsszs3333/invocra/releases/tag/v0.2.2), verify the checksum and install the binary:
 
 ```bash
 mkdir -p invocra-download
 cd invocra-download
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.1/invocra-v0.2.1-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.1/SHA256SUMS
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.2/invocra-v0.2.2-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/dsszs3333/invocra/releases/download/v0.2.2/SHA256SUMS
 sha256sum --check SHA256SUMS
-tar -xzf invocra-v0.2.1-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf invocra-v0.2.2-x86_64-unknown-linux-gnu.tar.gz
 install -Dm755 invocra "$HOME/.local/bin/invocra"
 "$HOME/.local/bin/invocra" --version
 ```
@@ -88,7 +88,7 @@ invocra --version
 ### From a pinned Git tag (Rust 1.88 or newer)
 
 ```bash
-cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.2.1 --locked invocra
+cargo install --git https://github.com/dsszs3333/invocra.git --tag v0.2.2 --locked invocra
 invocra --version
 ```
 
@@ -213,6 +213,11 @@ action is running, a spinner spins next to the row. When a watched pipeline fini
 desktop notification arrives (disable via `[settings] notifications = false`).
 
 ## Token permissions
+
+HTTPS connections use the operating system's trusted root certificates. For a private
+GitLab instance, install your organization's CA certificate in that trust store.
+On Linux, make sure the system CA bundle is installed (usually the `ca-certificates`
+package). Certificate and hostname verification remain enabled.
 
 - Scope `api` is required for write actions (pipeline/job control, tags, MR approval/merge). If you only
   want to **view** dashboards and never trigger actions, `read_api` is enough.

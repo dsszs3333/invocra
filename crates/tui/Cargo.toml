@@ -12,13 +12,13 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-config = { package = "invocra-config", path = "../config", version = "0.2.1" }
+config = { package = "invocra-config", path = "../config", version = "0.2.2" }
 crossterm.workspace = true
-gitlab = { package = "invocra-gitlab", path = "../gitlab", version = "0.2.1" }
+gitlab = { package = "invocra-gitlab", path = "../gitlab", version = "0.2.2" }
 ratatui.workspace = true
 ring.workspace = true
 serde.workspace = true
-storage = { package = "invocra-storage", path = "../storage", version = "0.2.1" }
+storage = { package = "invocra-storage", path = "../storage", version = "0.2.2" }
 tokio.workspace = true
 tracing.workspace = true
 
