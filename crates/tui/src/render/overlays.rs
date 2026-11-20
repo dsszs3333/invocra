@@ -519,12 +519,13 @@ pub(crate) fn log_body(
     term_area: Rect,
     focus: Focus,
     mode: ScreenMode,
+    hint: bool,
     view: &LogViewState,
 ) -> Option<(Rect, usize)> {
     if view.error.is_some() || view.lines.is_empty() {
         return None;
     }
-    let inner = super::panel_areas(term_area, focus, mode)
+    let inner = super::panel_areas(term_area, focus, mode, hint)
         .log
         .inner(Margin::new(1, 1));
     let height = usize::from(inner.height);
@@ -939,7 +940,7 @@ const HELP_ENTRIES: &[(&str, &str)] = &[
     ("u", "unpin branch (track repo default)"),
     ("/", "filter projects or branches"),
     ("esc", "back / clear filter"),
-    ("r", "refresh all projects"),
+    ("r", "refresh projects (in log: refresh log once)"),
     ("g", "jump to a project with a running pipeline"),
     ("a", "add a GitLab instance"),
     ("[ / ]", "switch GitLab instance tab"),

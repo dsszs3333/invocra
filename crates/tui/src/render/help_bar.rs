@@ -7,6 +7,18 @@ use super::util::{cached_suffix, spinner_frame};
 use crate::state::{AppState, Focus};
 
 pub(super) fn render(frame: &mut Frame, area: Rect, state: &AppState) {
+    let rows = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Length(1),
+        ratatui::layout::Constraint::Length(u16::from(!state.request_hint.is_empty())),
+        ratatui::layout::Constraint::Min(1),
+    ])
+    .split(area);
+    frame.render_widget(Paragraph::new(state.request_status.as_str()), rows[0]);
+    frame.render_widget(
+        Paragraph::new(state.request_hint.as_str()).style(Style::default().fg(Color::Yellow)),
+        rows[1],
+    );
+    let area = rows[2];
     // A spinner sits in front of the status message while a global refresh/load is running, so the
     // "Loading projects…" / "Refreshing…" line animates like every other loading indicator.
     let status = if state.is_refreshing {
@@ -17,7 +29,7 @@ pub(super) fn render(frame: &mut Frame, area: Rect, state: &AppState) {
 
     if state.focus == Focus::Log {
         let bar = Paragraph::new(format!(
-            "{status}  |  j/k move  g/G top/bottom  f follow  v select  y copy  tab/esc leave  q quit"
+            "{status}  |  j/k move  g/G top/bottom  f follow  r refresh log  v select  y copy  tab/esc leave  q quit"
         ));
         frame.render_widget(bar, area);
         return;

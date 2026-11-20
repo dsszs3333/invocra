@@ -51,6 +51,7 @@ use state::{AppState, Focus, Overlay, TraceFetchRequest};
 /// One configured GitLab instance, ready for the dashboard: an authenticated client and the
 /// projects and groups it tracks. The app builds one per `[[instance]]` in the config.
 pub struct InstanceRuntime {
+    pub request_overrides: config::RequestSettings,
     pub url: String,
     pub client: GitLabClient,
     pub sources: RefreshSources,
@@ -58,6 +59,7 @@ pub struct InstanceRuntime {
 
 /// Per-instance runtime backing one tab: its url, client, sources, and offline cache store.
 struct InstanceMeta {
+    request_overrides: config::RequestSettings,
     url: String,
     client: GitLabClient,
     sources: RefreshSources,
@@ -77,6 +79,7 @@ enum Outcome {
 struct PendingRefresh {
     generation: u64,
     clears_pending: bool,
+    auto_priority: Option<bool>,
     task: Option<tokio::task::AbortHandle>,
 }
 
@@ -90,6 +93,11 @@ struct Dashboard {
     // Pipeline id 0 denotes the latest snapshot; other ids denote a viewed pipeline.
     refreshes: HashMap<(u64, u64), PendingRefresh>,
     full_refresh: Option<(u64, tokio::task::AbortHandle)>,
+    trace_task: Option<(state::TraceFetchRequest, bool, tokio::task::AbortHandle)>,
+    trace_interval: Duration,
+    open_details_key: Option<(u64, u64)>,
+    open_details_generation: u64,
+    open_details_task: Option<tokio::task::AbortHandle>,
     state: AppState,
     /// Set when refresh events mutate `state`; the 1s UI tick flushes one write instead of one
     /// per project per refresh cycle.
@@ -127,6 +135,7 @@ impl Dashboard {
                 ))
             };
             metas.push(InstanceMeta {
+                request_overrides: inst.request_overrides,
                 url: inst.url,
                 client: inst.client,
                 sources: inst.sources,
@@ -144,6 +153,11 @@ impl Dashboard {
             completed_full_generation: 0,
             refreshes: HashMap::new(),
             full_refresh: None,
+            trace_task: None,
+            open_details_key: None,
+            open_details_generation: 0,
+            open_details_task: None,
+            trace_interval: crate::FOLLOW_REFRESH_INTERVAL,
             state,
             state_dirty: false,
             notifications_enabled,
@@ -174,6 +188,7 @@ impl Dashboard {
             PendingRefresh {
                 generation,
                 clears_pending: false,
+                auto_priority: None,
                 task: None,
             },
         ) {
@@ -204,11 +219,66 @@ impl Dashboard {
     }
 
     fn stop_refreshes(&mut self) {
+        self.open_details_key = None;
+        if let Some(task) = self.open_details_task.take() {
+            task.abort();
+        }
+        if let Some((_, _, task)) = self.trace_task.take() {
+            task.abort();
+        }
         if let Some((_, task)) = self.full_refresh.take() {
             task.abort();
         }
         for (_, request) in self.refreshes.drain() {
             if let Some(task) = request.task {
+                task.abort();
+            }
+        }
+    }
+
+    fn fetch_trace(
+        &mut self,
+        tx: &mpsc::Sender<AppEvent>,
+        request: TraceFetchRequest,
+        delay: Option<Duration>,
+    ) {
+        if delay.is_none() {
+            self.trace_interval = FOLLOW_REFRESH_INTERVAL;
+        }
+        if let Some((_, _, task)) = self.trace_task.take() {
+            task.abort();
+        }
+        let client = if delay.is_some() {
+            self.active_client().background()
+        } else {
+            self.active_client().clone()
+        };
+        let task = spawn_trace_fetch(
+            tx.clone(),
+            self.instance_generation,
+            client,
+            request.project_id,
+            request.job_id,
+            request.generation,
+            delay,
+        );
+        self.trace_task = Some((request, delay.is_some(), task.abort_handle()));
+    }
+
+    fn cancel_obsolete_trace(&mut self) {
+        let obsolete = self
+            .trace_task
+            .as_ref()
+            .is_some_and(|(request, polling, _)| {
+                !self.state.log.as_ref().is_some_and(|view| {
+                    view.project_id == request.project_id
+                        && view.job_id == request.job_id
+                        && view.generation == request.generation
+                        && (!polling || view.follow)
+                })
+            });
+        if obsolete {
+            if let Some((_, _, task)) = self.trace_task.take() {
                 task.abort();
             }
         }
@@ -224,7 +294,7 @@ impl Dashboard {
             tx.clone(),
             self.instance_generation,
             generation,
-            self.active_client().clone(),
+            self.active_client().background(),
             self.state.refresh_sources().clone(),
             self.state.ref_overrides.clone(),
         );
@@ -259,9 +329,96 @@ impl Dashboard {
                 {
                     *snapshot = current.clone();
                 }
+            } else if let Some(time) = report.updated_at.get(&snapshot.configured.id) {
+                self.state
+                    .last_updates
+                    .insert(snapshot.configured.id, *time);
             }
         }
         true
+    }
+
+    fn apply_full_progress(
+        &mut self,
+        instance: usize,
+        generation: u64,
+        snapshot: state::ProjectSnapshot,
+        updated_at: Instant,
+    ) -> Option<TraceFetchRequest> {
+        if instance != self.instance_generation
+            || self
+                .full_refresh
+                .as_ref()
+                .map(|(generation, _)| *generation)
+                != Some(generation)
+            || self
+                .refreshes
+                .get(&(snapshot.configured.id, 0))
+                .is_some_and(|request| {
+                    request.generation > generation
+                        || (request.task.is_some() && request.auto_priority.is_none())
+                })
+        {
+            return None;
+        }
+        let key = (snapshot.configured.id, 0);
+        if let Some(old) = self.refreshes.insert(
+            key,
+            PendingRefresh {
+                generation,
+                clears_pending: false,
+                auto_priority: None,
+                task: None,
+            },
+        ) {
+            if let Some(task) = old.task {
+                task.abort();
+            }
+        }
+        if !snapshot.has_error() {
+            self.state.last_updates.insert(key.0, updated_at);
+        }
+        if !(snapshot.is_failed() && self.state.is_showing_cached_data()) {
+            return self.state.apply_project_auto_refresh(snapshot);
+        }
+        None
+    }
+
+    fn fetch_project_auto(
+        &mut self,
+        tx: &mpsc::Sender<AppEvent>,
+        snapshot: state::ProjectSnapshot,
+        details_due: bool,
+    ) {
+        let id = snapshot.configured.id;
+        let key = (id, 0);
+        let open = self.state.selected_project_id == Some(id)
+            && !self.state.viewed_pipeline.contains_key(&id);
+        let ref_override = self.state.ref_overrides.get(&id).cloned();
+        let generation = self.start_project_request(key);
+        let client = if open {
+            self.active_client().for_open_pipeline()
+        } else {
+            self.active_client().background()
+        };
+        let task = spawn_refresh_one_auto(
+            tx.clone(),
+            self.instance_generation,
+            generation,
+            client,
+            snapshot,
+            ref_override,
+            details_due,
+        );
+        self.refreshes.insert(
+            key,
+            PendingRefresh {
+                generation,
+                clears_pending: false,
+                auto_priority: Some(open),
+                task: Some(task.abort_handle()),
+            },
+        );
     }
 
     fn fetch_viewed_pipeline(
@@ -270,6 +427,7 @@ impl Dashboard {
         project_id: u64,
         pipeline_project_id: u64,
         pipeline_id: u64,
+        background: bool,
     ) {
         let key = (project_id, pipeline_id);
         let generation = self.start_project_request(key);
@@ -277,7 +435,15 @@ impl Dashboard {
             tx.clone(),
             self.instance_generation,
             generation,
-            self.active_client().clone(),
+            if background {
+                if self.state.selected_project_id == Some(project_id) {
+                    self.active_client().for_open_pipeline()
+                } else {
+                    self.active_client().background()
+                }
+            } else {
+                self.active_client().clone()
+            },
             project_id,
             pipeline_project_id,
             pipeline_id,
@@ -287,6 +453,8 @@ impl Dashboard {
             PendingRefresh {
                 generation,
                 clears_pending: false,
+                auto_priority: background
+                    .then_some(self.state.selected_project_id == Some(project_id)),
                 task: Some(task.abort_handle()),
             },
         );
@@ -335,6 +503,7 @@ impl Dashboard {
         self.state_dirty = false;
         let target = if let Some(idx) = self.metas.iter().position(|meta| meta.url == rt.url) {
             // Re-configuring an existing instance: refresh its client and sources, keep its cache.
+            self.metas[idx].request_overrides = rt.request_overrides;
             self.metas[idx].client = rt.client;
             self.metas[idx].sources = rt.sources;
             idx
@@ -343,6 +512,7 @@ impl Dashboard {
                 .context("failed to resolve dashboard cache path")?;
             self.labels.push(cache::instance_label(&rt.url));
             self.metas.push(InstanceMeta {
+                request_overrides: rt.request_overrides,
                 url: rt.url,
                 client: rt.client,
                 sources: rt.sources,
@@ -394,6 +564,7 @@ fn load_state_for(
     state.instance_labels = labels.to_vec();
     state.active_instance = active;
     state.notifications_enabled = notifications_enabled;
+    state.auto_refresh = meta.client.auto_refresh();
     state
 }
 
@@ -436,6 +607,17 @@ impl Drop for TerminalModeGuard {
 enum AppEvent {
     Input(CEvent),
     RefreshCompleted(RefreshReport),
+    FullRefreshProgress {
+        instance: usize,
+        generation: u64,
+        snapshot: Box<state::ProjectSnapshot>,
+        updated_at: Instant,
+    },
+    OpenDetailsReady {
+        instance: usize,
+        generation: u64,
+        key: (u64, u64),
+    },
     ProjectRefreshed {
         instance: usize,
         generation: u64,
@@ -542,13 +724,14 @@ pub(crate) struct RunningHit {
 }
 
 /// How often follow mode re-fetches a running job's trace.
-const FOLLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const FOLLOW_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How often the dashboard re-fetches projects whose latest pipeline is still in flight, so the
 /// pipeline panel (job statuses) and a followed job log stay live without a keystroke. The TIME
 /// column ticks every second on its own (see [`UI_TICK_INTERVAL`]); this only governs how often the
 /// authoritative server state (statuses, durations) is re-synced.
 const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+const HIDDEN_DETAILS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How often the UI redraws on its own so optimistic timers (the running-job TIME column) advance
 /// smoothly between server refreshes. Local only — issues no requests.
@@ -610,9 +793,11 @@ async fn add_instances_via_wizard(dashboard: &mut Dashboard) -> Result<()> {
         // Keep any proxy already set for this url; the wizard doesn't collect one.
         let proxy = cfg.proxy_for(&rt.url);
         let allow_insecure_http = cfg.allow_insecure_http_for(&rt.url);
+        let requests = cfg.request_overrides_for(&rt.url);
         config::upsert_instance(
             &mut cfg,
             config::InstanceConfig {
+                requests,
                 url: rt.url.clone(),
                 proxy,
                 allow_insecure_http,
@@ -622,7 +807,12 @@ async fn add_instances_via_wizard(dashboard: &mut Dashboard) -> Result<()> {
         );
     }
     config::save_config(&cfg)?;
-    for rt in added {
+    for mut rt in added {
+        let requests = cfg.requests_for(&rt.url);
+        rt.request_overrides = cfg.request_overrides_for(&rt.url);
+        rt.client = rt
+            .client
+            .with_request_policy(requests.limit(), requests.automatic());
         dashboard.add_instance(rt)?;
     }
     Ok(())
@@ -640,6 +830,9 @@ async fn run_loop(
     spawn_tick(tx.clone(), UI_TICK_INTERVAL, AppEvent::UiTick);
 
     let outcome = loop {
+        refresh_open_details(dashboard, &tx);
+        dashboard.cancel_obsolete_trace();
+        update_request_status(dashboard);
         let active = dashboard.instance_generation;
         let active_client = dashboard.active_client().clone();
         maybe_fetch_branches(&mut dashboard.state, &tx, active, &active_client);
@@ -710,7 +903,9 @@ async fn run_loop(
                     dashboard.spinner_running = false;
                 }
             }
-            AppEvent::RefreshCompleted(_)
+            AppEvent::FullRefreshProgress { .. }
+            | AppEvent::OpenDetailsReady { .. }
+            | AppEvent::RefreshCompleted(_)
             | AppEvent::ProjectRefreshed { .. }
             | AppEvent::ProjectAutoRefreshed { .. }
             | AppEvent::ActionCompleted(_)
@@ -747,6 +942,55 @@ async fn run_loop(
     outcome
 }
 
+fn update_request_status(dashboard: &mut Dashboard) {
+    let client = dashboard.active_client();
+    if client.is_demo() {
+        dashboard.state.request_status = "Demo | embedded data".into();
+        dashboard.state.request_hint.clear();
+        return;
+    }
+    let status = client.request_status();
+    let mode = if client.auto_refresh() {
+        "Auto"
+    } else {
+        "Manual"
+    };
+    let overrides = dashboard.metas[dashboard.active].request_overrides;
+    let source = |overridden| if overridden { "instance" } else { "default" };
+    let budget = status
+        .limit
+        .map_or_else(|| "unlimited".into(), |limit| format!("{limit}/min"));
+    let age = dashboard
+        .state
+        .selected_item()
+        .and_then(|item| dashboard.state.last_updates.get(&item.configured.id))
+        .map_or_else(
+            || "not updated this session".into(),
+            |time| format!("updated {}s ago", time.elapsed().as_secs()),
+        );
+    let wait = if !status.server_pause.is_zero() {
+        format!("Server pause {}s | ", status.server_pause.as_secs() + 1)
+    } else if status.waiting > 0 {
+        format!(
+            "{} queued, next in {}s | ",
+            status.waiting,
+            status.wait.as_secs() + 1
+        )
+    } else {
+        String::new()
+    };
+    dashboard.state.request_status = format!(
+        "{wait}{mode} ({}) | {budget} ({}) | {age}",
+        source(overrides.auto_refresh.is_some()),
+        source(overrides.requests_per_minute.is_some())
+    );
+    dashboard.state.request_hint = if status.rate_limited {
+        "429: edit ~/.config/invocra/projects.toml: lower requests_per_minute or auto_refresh=false; restart".into()
+    } else {
+        String::new()
+    };
+}
+
 /// Applies full, project and viewed-pipeline refresh results.
 /// Returns events outside this group for further dispatch.
 fn handle_refresh_event(
@@ -754,7 +998,29 @@ fn handle_refresh_event(
     dashboard: &mut Dashboard,
     tx: &mpsc::Sender<AppEvent>,
 ) -> Option<AppEvent> {
+    let automatic = matches!(event, AppEvent::ProjectAutoRefreshed { .. });
     match event {
+        AppEvent::OpenDetailsReady {
+            instance,
+            generation,
+            key,
+        } => {
+            if instance == dashboard.instance_generation
+                && generation == dashboard.open_details_generation
+                && dashboard.open_details_key == Some(key)
+            {
+                fetch_open_details(dashboard, tx, key);
+            }
+        }
+        AppEvent::FullRefreshProgress {
+            instance,
+            generation,
+            snapshot,
+            updated_at,
+        } => {
+            let follow = dashboard.apply_full_progress(instance, generation, *snapshot, updated_at);
+            resume_log_follow(follow, tx, dashboard);
+        }
         AppEvent::RefreshCompleted(mut report) => {
             if !dashboard.accept_full_refresh(&mut report) {
                 return None;
@@ -788,30 +1054,29 @@ fn handle_refresh_event(
             instance,
             generation,
             snapshot,
-        } => {
-            if instance != dashboard.instance_generation {
-                return None;
-            }
-            if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) {
-                return None;
-            }
-            let follow = dashboard.state.apply_project_refresh(*snapshot);
-            resume_log_follow(follow, tx, instance, dashboard.active_client());
-            dashboard.state_dirty = true;
         }
-        AppEvent::ProjectAutoRefreshed {
+        | AppEvent::ProjectAutoRefreshed {
             instance,
             generation,
             snapshot,
         } => {
-            if instance != dashboard.instance_generation {
+            if instance != dashboard.instance_generation
+                || !dashboard.finish_project_request((snapshot.configured.id, 0), generation)
+            {
                 return None;
             }
-            if !dashboard.finish_project_request((snapshot.configured.id, 0), generation) {
-                return None;
+            if !snapshot.has_error() {
+                dashboard
+                    .state
+                    .last_updates
+                    .insert(snapshot.configured.id, Instant::now());
             }
-            let follow = dashboard.state.apply_project_auto_refresh(*snapshot);
-            resume_log_follow(follow, tx, instance, dashboard.active_client());
+            let follow = if automatic {
+                dashboard.state.apply_project_auto_refresh(*snapshot)
+            } else {
+                dashboard.state.apply_project_refresh(*snapshot)
+            };
+            resume_log_follow(follow, tx, dashboard);
             dashboard.state_dirty = true;
         }
         AppEvent::PipelineJobsLoaded {
@@ -829,7 +1094,7 @@ fn handle_refresh_event(
             }
             let follow =
                 handle_pipeline_jobs_loaded(project_id, pipeline_id, result, &mut dashboard.state);
-            resume_log_follow(follow, tx, instance, dashboard.active_client());
+            resume_log_follow(follow, tx, dashboard);
         }
         event => return Some(event),
     }
@@ -1076,11 +1341,46 @@ fn spawn_tick(tx: mpsc::Sender<AppEvent>, delay: Duration, event: AppEvent) {
 /// statuses keep advancing. Silent (no "Refreshing…" flash) and per-project — idle projects cost
 /// nothing. Projects already awaiting an action-driven refresh are skipped to avoid double fetches.
 fn refresh_active_projects(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>) {
-    if dashboard.full_refresh.is_some() {
+    if !dashboard.active_client().auto_refresh() {
         return;
     }
-    for project_id in dashboard.state.active_project_ids() {
+    let open_key = dashboard.state.selected_project_id.map(|id| {
+        (
+            id,
+            dashboard
+                .state
+                .viewed_pipeline
+                .get(&id)
+                .map_or(0, |view| view.pipeline.id),
+        )
+    });
+    // Replace queued polls when navigation changes their priority; never cancel a manual action.
+    for (&key, request) in &mut dashboard.refreshes {
+        if request
+            .auto_priority
+            .is_some_and(|was_open| was_open != (Some(key) == open_key))
+        {
+            if let Some(task) = request.task.take() {
+                task.abort();
+            }
+        }
+    }
+    let mut active = dashboard.state.active_project_ids();
+    active.sort_by_key(|id| Some(*id) != dashboard.state.selected_project_id);
+    for project_id in active {
         let key = (project_id, 0);
+        if dashboard
+            .full_refresh
+            .as_ref()
+            .is_some_and(|(generation, _)| {
+                dashboard
+                    .refreshes
+                    .get(&key)
+                    .is_none_or(|request| request.generation < *generation)
+            })
+        {
+            continue;
+        }
         if dashboard
             .refreshes
             .get(&key)
@@ -1094,35 +1394,23 @@ fn refresh_active_projects(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent
             .iter()
             .find(|item| item.configured.id == project_id)
         {
-            let configured = item.configured.clone();
-            let origin = item.origin;
-            let ref_override = dashboard.state.ref_overrides.get(&project_id).cloned();
-            let generation = dashboard.start_project_request(key);
-            let task = spawn_refresh_one_auto(
-                tx.clone(),
-                dashboard.instance_generation,
-                generation,
-                dashboard.active_client().clone(),
-                configured,
-                origin,
-                ref_override,
-            );
-            dashboard.refreshes.insert(
-                key,
-                PendingRefresh {
-                    generation,
-                    clears_pending: false,
-                    task: Some(task.abort_handle()),
-                },
-            );
+            let details_due = open_key == Some(key)
+                || item
+                    .details_updated_at
+                    .is_none_or(|time| time.elapsed() >= HIDDEN_DETAILS_INTERVAL);
+            dashboard.fetch_project_auto(tx, item.clone(), details_due);
         }
     }
     let views: Vec<_> = dashboard
         .state
         .viewed_pipeline
         .iter()
-        .filter(|(_, view)| {
+        .filter(|(id, view)| {
             view.pipeline.status.is_active()
+                && (dashboard.state.selected_project_id == Some(**id)
+                    || view
+                        .details_updated_at
+                        .is_none_or(|time| time.elapsed() >= HIDDEN_DETAILS_INTERVAL))
                 && !view.loading
                 && !dashboard.state.pending_actions.contains(&view.project_id)
         })
@@ -1136,8 +1424,109 @@ fn refresh_active_projects(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent
         {
             continue;
         }
-        dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id);
+        dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id, true);
     }
+}
+
+/// Wait for navigation to settle before spending automatic request budget on stale details.
+fn refresh_open_details(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>) {
+    let key = dashboard.state.selected_project_id.map(|id| {
+        (
+            id,
+            dashboard
+                .state
+                .viewed_pipeline
+                .get(&id)
+                .map_or(0, |view| view.pipeline.id),
+        )
+    });
+    if dashboard.open_details_key == key {
+        return;
+    }
+    if let Some(task) = dashboard.open_details_task.take() {
+        task.abort();
+        if let Some(request) = dashboard
+            .open_details_key
+            .and_then(|key| dashboard.refreshes.get_mut(&key))
+        {
+            if request
+                .task
+                .as_ref()
+                .is_some_and(|pending| pending.id() == task.id())
+            {
+                request.task = None;
+            }
+        }
+    }
+    dashboard.open_details_key = key;
+    dashboard.open_details_generation += 1;
+    let generation = dashboard.open_details_generation;
+    let Some(key) = key.filter(|_| dashboard.active_client().auto_refresh()) else {
+        return;
+    };
+    let tx = tx.clone();
+    let instance = dashboard.instance_generation;
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = tx
+            .send(AppEvent::OpenDetailsReady {
+                instance,
+                generation,
+                key,
+            })
+            .await;
+    });
+    dashboard.open_details_task = Some(task.abort_handle());
+}
+
+fn fetch_open_details(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent>, key: (u64, u64)) {
+    let id = key.0;
+    if !dashboard.active_client().auto_refresh()
+        || dashboard.state.pending_actions.contains(&id)
+        || dashboard
+            .refreshes
+            .get(&key)
+            .is_some_and(|request| request.task.is_some())
+        || (key.1 == 0
+            && dashboard
+                .full_refresh
+                .as_ref()
+                .is_some_and(|(generation, _)| {
+                    dashboard
+                        .refreshes
+                        .get(&key)
+                        .is_none_or(|request| request.generation < *generation)
+                }))
+    {
+        return;
+    }
+    if let Some(view) = dashboard.state.viewed_pipeline.get(&id) {
+        if view.loading
+            || view
+                .details_updated_at
+                .is_some_and(|time| time.elapsed() < AUTO_REFRESH_INTERVAL)
+        {
+            return;
+        }
+        dashboard.fetch_viewed_pipeline(tx, id, view.project_id, view.pipeline.id, true);
+    } else if let Some(snapshot) = dashboard
+        .state
+        .items
+        .iter()
+        .find(|item| item.configured.id == id)
+    {
+        if snapshot
+            .details_updated_at
+            .is_some_and(|time| time.elapsed() < AUTO_REFRESH_INTERVAL)
+        {
+            return;
+        }
+        dashboard.fetch_project_auto(tx, snapshot.clone(), true);
+    }
+    dashboard.open_details_task = dashboard
+        .refreshes
+        .get(&key)
+        .and_then(|request| request.task.clone());
 }
 
 /// After a refresh re-enabled follow on the open log, kick a one-shot trace fetch so the
@@ -1145,19 +1534,12 @@ fn refresh_active_projects(dashboard: &mut Dashboard, tx: &mpsc::Sender<AppEvent
 fn resume_log_follow(
     request: Option<TraceFetchRequest>,
     tx: &mpsc::Sender<AppEvent>,
-    instance: usize,
-    client: &GitLabClient,
+    dashboard: &mut Dashboard,
 ) {
-    if let Some(req) = request {
-        spawn_trace_fetch(
-            tx.clone(),
-            instance,
-            client.clone(),
-            req.project_id,
-            req.job_id,
-            req.generation,
-            None,
-        );
+    if dashboard.active_client().auto_refresh() {
+        if let Some(request) = request {
+            dashboard.fetch_trace(tx, request, None);
+        }
     }
 }
 
@@ -1228,7 +1610,7 @@ fn handle_action_completed(
                 if let Some(view) = dashboard.state.viewed_pipeline.get_mut(&id) {
                     view.loading = true;
                 }
-                dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id);
+                dashboard.fetch_viewed_pipeline(tx, id, project_id, pipeline_id, false);
             }
             if views.is_empty() {
                 if dashboard
@@ -1264,21 +1646,29 @@ fn handle_trace_loaded(
     dashboard: &mut Dashboard,
     tx: &mpsc::Sender<AppEvent>,
 ) {
-    // Capture the active instance/client before borrowing the log mutably below.
-    let instance = dashboard.instance_generation;
-    let client = dashboard.active_client().clone();
     let Some(view) = &mut dashboard.state.log else {
         return;
     };
-    if view.apply_trace(project_id, job_id, generation, result) {
-        spawn_trace_fetch(
-            tx.clone(),
-            instance,
-            client,
-            project_id,
-            job_id,
-            generation,
-            Some(FOLLOW_REFRESH_INTERVAL),
+    if view.project_id != project_id || view.job_id != job_id || view.generation != generation {
+        return;
+    }
+    dashboard.trace_task = None;
+    let previous = view.raw.clone();
+    let follow = view.apply_trace(project_id, job_id, generation, result);
+    dashboard.trace_interval = if previous == view.raw {
+        (dashboard.trace_interval * 2).min(Duration::from_secs(15))
+    } else {
+        FOLLOW_REFRESH_INTERVAL
+    };
+    if follow && dashboard.active_client().auto_refresh() {
+        dashboard.fetch_trace(
+            tx,
+            TraceFetchRequest {
+                project_id,
+                job_id,
+                generation,
+            },
+            Some(dashboard.trace_interval),
         );
     }
 }
@@ -1457,6 +1847,7 @@ fn spawn_project_refresh(
             PendingRefresh {
                 generation,
                 clears_pending: true,
+                auto_priority: None,
                 task: Some(task.abort_handle()),
             },
         );
@@ -1502,6 +1893,7 @@ fn handle_pipeline_jobs_loaded(
     view.loading = false;
     match result {
         Ok((pipeline, jobs, bridges)) => {
+            view.details_updated_at = Some(Instant::now());
             view.pipeline = pipeline;
             view.jobs = jobs;
             view.bridges = bridges;
@@ -1536,8 +1928,9 @@ fn handle_input(
             // cursor on screen (the input layer has no other view onto the rendered geometry).
             let focus = dashboard.state.focus;
             let mode = dashboard.state.screen_mode;
+            let hint = !dashboard.state.request_hint.is_empty();
             if let Some(view) = &mut dashboard.state.log {
-                view.viewport_height = render::log_inner_height(term_area, focus, mode);
+                view.viewport_height = render::log_inner_height(term_area, focus, mode, hint);
             }
             input::apply_key(&mut dashboard.state, key)
         }
@@ -1550,8 +1943,9 @@ fn handle_input(
     // next interaction.
     let focus = dashboard.state.focus;
     let mode = dashboard.state.screen_mode;
+    let hint = !dashboard.state.request_hint.is_empty();
     if let Some(view) = &mut dashboard.state.log {
-        view.set_wrap_width(render::log_inner_width(term_area, focus, mode));
+        view.set_wrap_width(render::log_inner_width(term_area, focus, mode, hint));
     }
 
     for command in commands {
@@ -1592,13 +1986,13 @@ fn handle_command(
             project_id,
             job_id,
             generation,
-        } => spawn_trace_fetch(
-            tx.clone(),
-            instance,
-            client.clone(),
-            project_id,
-            job_id,
-            generation,
+        } => dashboard.fetch_trace(
+            tx,
+            TraceFetchRequest {
+                project_id,
+                job_id,
+                generation,
+            },
             None,
         ),
         Command::FetchVariables { project_id } => {
@@ -1647,7 +2041,9 @@ fn handle_command(
             project_id,
             pipeline_project_id,
             pipeline_id,
-        } => dashboard.fetch_viewed_pipeline(tx, project_id, pipeline_project_id, pipeline_id),
+        } => {
+            dashboard.fetch_viewed_pipeline(tx, project_id, pipeline_project_id, pipeline_id, false)
+        }
         Command::DownloadArtifacts {
             project_id,
             job_id,
@@ -1801,7 +2197,13 @@ fn value_select_extend(state: &mut AppState, term_area: Rect, point: Position) -
 /// pane so `y` can copy it. Returns whether the press was consumed by the log.
 fn log_select_start(state: &mut AppState, term_area: Rect, point: Position) -> bool {
     let Some((body, offset)) = state.log.as_ref().and_then(|view| {
-        render::overlays::log_body(term_area, state.focus, state.screen_mode, view)
+        render::overlays::log_body(
+            term_area,
+            state.focus,
+            state.screen_mode,
+            !state.request_hint.is_empty(),
+            view,
+        )
     }) else {
         return false;
     };
@@ -1831,7 +2233,13 @@ fn log_select_extend(state: &mut AppState, term_area: Rect, point: Position) {
         return;
     }
     let Some((body, offset)) = state.log.as_ref().and_then(|view| {
-        render::overlays::log_body(term_area, state.focus, state.screen_mode, view)
+        render::overlays::log_body(
+            term_area,
+            state.focus,
+            state.screen_mode,
+            !state.request_hint.is_empty(),
+            view,
+        )
     }) else {
         return;
     };
@@ -1882,7 +2290,8 @@ fn handle_scroll(down: bool, state: &mut AppState, term_area: Rect, point: Posit
         Overlay::None => {}
     }
 
-    let areas = render::panel_areas(term_area, state.focus, state.screen_mode);
+    let hint = !state.request_hint.is_empty();
+    let areas = render::panel_areas(term_area, state.focus, state.screen_mode, hint);
     if areas.log.contains(point) {
         state.scroll_log(down, MOUSE_LOG_SCROLL_STEP);
     } else if areas.merge_requests.contains(point) {
@@ -1958,7 +2367,8 @@ fn handle_click(state: &mut AppState, term_area: Rect, point: Position) -> Vec<C
         Overlay::None => {}
     }
 
-    let areas = render::panel_areas(term_area, state.focus, state.screen_mode);
+    let hint = !state.request_hint.is_empty();
+    let areas = render::panel_areas(term_area, state.focus, state.screen_mode, hint);
     let (projects_body, _) = render::projects_panel::body_layout(areas.projects);
     if let Some(index) = hit_row(
         projects_body,
@@ -2229,6 +2639,7 @@ mod tests {
         state.viewed_pipeline.insert(
             1,
             ViewedPipeline {
+                details_updated_at: None,
                 project_id: 8,
                 pipeline: pipeline.clone(),
                 jobs: vec![],
@@ -2264,6 +2675,7 @@ mod tests {
         };
         let metas = (0..2)
             .map(|index| super::InstanceMeta {
+                request_overrides: Default::default(),
                 url: format!("https://git{index}.example"),
                 client: gitlab::GitLabClient::new(
                     format!("https://git{index}.example"),
@@ -2286,6 +2698,11 @@ mod tests {
             completed_full_generation: 0,
             refreshes: Default::default(),
             full_refresh: None,
+            trace_task: None,
+            open_details_key: None,
+            open_details_generation: 0,
+            open_details_task: None,
+            trace_interval: crate::FOLLOW_REFRESH_INTERVAL,
             state: crate::state::AppState::new(sources),
             state_dirty: false,
             notifications_enabled: false,
@@ -2369,8 +2786,8 @@ mod tests {
         let current = dashboard.refreshes[&(1, 0)].generation;
         assert!(!dashboard.finish_project_request((1, 0), old));
         assert!(dashboard.refreshes[&(1, 0)].task.is_some());
-        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 100);
-        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 101);
+        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 100, false);
+        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 101, false);
         assert!(!dashboard.refreshes.contains_key(&(1, 100)));
         assert_eq!(dashboard.refreshes.len(), 2);
         tokio::task::yield_now().await;
@@ -2405,6 +2822,7 @@ mod tests {
         dashboard.start_full_refresh(&tx);
         assert_eq!(dashboard.request_generation, generation);
         let mut report = super::RefreshReport {
+            updated_at: Default::default(),
             instance: 0,
             generation,
             snapshots: dashboard.state.items.clone(),
@@ -2441,6 +2859,7 @@ mod tests {
         assert_eq!(dashboard.active, 0);
         assert_ne!(dashboard.instance_generation, original);
         let mut report = super::RefreshReport {
+            updated_at: Default::default(),
             instance: original,
             generation: 0,
             snapshots: vec![],
@@ -2558,11 +2977,32 @@ mod tests {
         let old = dashboard.refreshes[&(1, 0)].generation;
         dashboard.state.pending_actions.insert(1);
         dashboard.state.mark_in_flight(1, 42);
-        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 42);
+        dashboard.fetch_viewed_pipeline(&tx, 1, 1, 42, false);
         let view_generation = dashboard.refreshes[&(1, 42)].generation;
         dashboard.start_full_refresh(&tx);
+        let manual = dashboard.refreshes[&(1, 0)]
+            .task
+            .as_ref()
+            .expect("manual")
+            .id();
+        dashboard.apply_full_progress(
+            0,
+            dashboard.request_generation,
+            dashboard.state.items[0].clone(),
+            std::time::Instant::now(),
+        );
+        assert_eq!(
+            dashboard.refreshes[&(1, 0)]
+                .task
+                .as_ref()
+                .expect("manual preserved")
+                .id(),
+            manual
+        );
+        assert!(dashboard.state.pending_actions.contains(&1));
         assert!(dashboard.refreshes[&(1, 42)].task.is_some());
         let mut report = super::RefreshReport {
+            updated_at: Default::default(),
             instance: 0,
             generation: dashboard.request_generation,
             snapshots: vec![],
@@ -2584,5 +3024,247 @@ mod tests {
         assert!(!dashboard.finish_project_request((1, 0), auto_generation));
         assert!(dashboard.state.pending_actions.contains(&1));
         pending.abort();
+    }
+    #[tokio::test]
+    async fn manual_mode_does_not_schedule_background_refresh_but_allows_explicit_refresh() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        dashboard.metas[0].client = gitlab::GitLabClient::demo()
+            .expect("demo")
+            .with_request_policy(None, false);
+        dashboard.state.auto_refresh = false;
+        dashboard.state.items[0].pipeline =
+            Some(serde_json::from_str(r#"{"id":42,"status":"running"}"#).expect("pipeline"));
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        for _ in 0..100 {
+            super::refresh_active_projects(&mut dashboard, &tx);
+        }
+        assert!(dashboard.refreshes.is_empty());
+        assert_eq!(dashboard.request_generation, 0);
+        dashboard.start_full_refresh(&tx);
+        assert!(dashboard.full_refresh.is_some());
+        dashboard.stop_refreshes();
+    }
+
+    #[tokio::test]
+    async fn replacing_or_closing_a_log_cancels_pending_trace_requests() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        let request = super::TraceFetchRequest {
+            project_id: 1,
+            job_id: 2,
+            generation: 1,
+        };
+        dashboard.fetch_trace(&tx, request, Some(std::time::Duration::from_secs(60)));
+        let first = dashboard.trace_task.as_ref().expect("task").2.clone();
+        dashboard.fetch_trace(
+            &tx,
+            super::TraceFetchRequest {
+                job_id: 3,
+                ..request
+            },
+            Some(std::time::Duration::from_secs(60)),
+        );
+        tokio::task::yield_now().await;
+        assert!(first.is_finished());
+        let second = dashboard.trace_task.as_ref().expect("task").2.clone();
+        dashboard.cancel_obsolete_trace(); // no log is open
+        tokio::task::yield_now().await;
+        assert!(second.is_finished());
+        assert!(dashboard.trace_task.is_none());
+    }
+    #[tokio::test]
+    async fn full_refresh_keeps_the_actual_fetch_time_for_each_project() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        dashboard.start_full_refresh(&tx);
+        let fetched = std::time::Instant::now() - std::time::Duration::from_secs(90);
+        let task = dashboard.full_refresh.as_ref().expect("refresh").1.clone();
+        let mut report = super::RefreshReport {
+            instance: 0,
+            generation: dashboard.request_generation,
+            snapshots: dashboard.state.items.clone(),
+            updated_at: [(1, fetched)].into_iter().collect(),
+            errors: 0,
+            is_complete_failure: false,
+            group_errors: vec![],
+        };
+        assert!(dashboard.accept_full_refresh(&mut report));
+        assert_eq!(dashboard.state.last_updates[&1], fetched);
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn navigation_reprioritizes_auto_polls_without_duplicating_or_cancelling_manual_requests()
+    {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        dashboard.state.items[0].pipeline =
+            Some(serde_json::from_str(r#"{"id":42,"status":"running"}"#).expect("pipeline"));
+        let mut second = dashboard.state.items[0].clone();
+        second.configured.id = 2;
+        dashboard.state.items.push(second);
+        dashboard.state.selected_project_id = Some(1);
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        super::refresh_active_projects(&mut dashboard, &tx);
+        assert_eq!(dashboard.refreshes[&(1, 0)].auto_priority, Some(true));
+        assert_eq!(dashboard.refreshes[&(2, 0)].auto_priority, Some(false));
+        let generation = dashboard.request_generation;
+        super::refresh_active_projects(&mut dashboard, &tx);
+        assert_eq!(dashboard.request_generation, generation);
+        let old = dashboard.refreshes[&(2, 0)].generation;
+        dashboard.state.selected_project_id = Some(2);
+        super::refresh_active_projects(&mut dashboard, &tx);
+        assert!(dashboard.refreshes[&(2, 0)].generation > old);
+        assert_eq!(dashboard.refreshes[&(2, 0)].auto_priority, Some(true));
+        assert_eq!(dashboard.refreshes[&(1, 0)].auto_priority, Some(false));
+        super::spawn_project_refresh(&mut dashboard, &tx, 1, std::time::Duration::from_secs(60));
+        let manual = dashboard.refreshes[&(1, 0)].generation;
+        dashboard.state.selected_project_id = Some(1);
+        super::refresh_active_projects(&mut dashboard, &tx);
+        assert_eq!(dashboard.refreshes[&(1, 0)].generation, manual);
+        assert_eq!(dashboard.refreshes[&(1, 0)].auto_priority, None);
+        dashboard.stop_refreshes();
+    }
+    #[tokio::test]
+    async fn rapid_navigation_does_not_start_network_refreshes() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        for id in 1..=30 {
+            let mut item = dashboard.state.items[0].clone();
+            item.configured.id = id;
+            dashboard.state.items.push(item);
+            dashboard.state.selected_project_id = Some(id);
+            super::refresh_open_details(&mut dashboard, &tx);
+        }
+        assert!(
+            dashboard.refreshes.is_empty(),
+            "navigation must debounce network work"
+        );
+        dashboard.stop_refreshes();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn opening_a_project_debounces_cancels_and_preserves_manual_requests() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let mut second = dashboard.state.items[0].clone();
+        second.configured.id = 2;
+        dashboard.state.items.push(second);
+        dashboard.state.selected_project_id = Some(1);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        super::refresh_open_details(&mut dashboard, &tx);
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_millis(299)).await;
+        assert!(rx.try_recv().is_err());
+        let ready = rx.recv().await.expect("debounce");
+        super::handle_refresh_event(ready, &mut dashboard, &tx);
+        let task = dashboard.refreshes[&(1, 0)]
+            .task
+            .clone()
+            .expect("open fetch");
+        assert_eq!(dashboard.refreshes[&(1, 0)].auto_priority, Some(true));
+        dashboard.state.selected_project_id = Some(2);
+        super::refresh_open_details(&mut dashboard, &tx);
+        assert!(dashboard.refreshes[&(1, 0)].task.is_none());
+        tokio::task::yield_now().await;
+        assert!(task.is_finished());
+        super::spawn_project_refresh(&mut dashboard, &tx, 2, std::time::Duration::from_secs(60));
+        let manual = dashboard.refreshes[&(2, 0)].generation;
+        let ready = rx.recv().await.expect("debounce");
+        super::handle_refresh_event(ready, &mut dashboard, &tx);
+        dashboard.state.selected_project_id = Some(1);
+        super::refresh_open_details(&mut dashboard, &tx);
+        assert_eq!(dashboard.refreshes[&(2, 0)].generation, manual);
+        assert!(!dashboard.refreshes[&(2, 0)]
+            .task
+            .as_ref()
+            .expect("manual")
+            .is_finished());
+        dashboard.stop_refreshes();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_debounce_events_cannot_fetch_after_returning_to_the_same_project() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        super::refresh_open_details(&mut dashboard, &tx);
+        let stale = rx.recv().await.expect("first debounce");
+        dashboard.state.selected_project_id = None;
+        super::refresh_open_details(&mut dashboard, &tx);
+        dashboard.state.selected_project_id = Some(1);
+        super::refresh_open_details(&mut dashboard, &tx);
+        super::handle_refresh_event(stale, &mut dashboard, &tx);
+        assert!(dashboard.refreshes.is_empty());
+        let ready = rx.recv().await.expect("current debounce");
+        super::handle_refresh_event(ready, &mut dashboard, &tx);
+        assert!(dashboard.refreshes[&(1, 0)].task.is_some());
+        dashboard.stop_refreshes();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn opening_fresh_details_or_navigating_in_manual_mode_does_not_fetch() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+        dashboard.state.items[0].details_updated_at = Some(std::time::Instant::now());
+        super::refresh_open_details(&mut dashboard, &tx);
+        let ready = rx.recv().await.expect("debounce");
+        super::handle_refresh_event(ready, &mut dashboard, &tx);
+        assert!(dashboard.refreshes.is_empty());
+        dashboard.metas[0].client = dashboard
+            .active_client()
+            .clone()
+            .with_request_policy(None, false);
+        dashboard.state.selected_project_id = None;
+        super::refresh_open_details(&mut dashboard, &tx);
+        dashboard.state.selected_project_id = Some(1);
+        super::refresh_open_details(&mut dashboard, &tx);
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        assert!(rx.try_recv().is_err());
+        assert!(dashboard.refreshes.is_empty());
+        super::spawn_project_refresh(&mut dashboard, &tx, 1, std::time::Duration::from_secs(60));
+        assert!(dashboard.refreshes[&(1, 0)].task.is_some());
+        dashboard.stop_refreshes();
+    }
+
+    #[tokio::test]
+    async fn full_refresh_progress_is_visible_and_cannot_revert_newer_requests() {
+        let cache = tempfile::tempdir().expect("cache");
+        let mut dashboard = test_dashboard(cache.path());
+        let (tx, _rx) = tokio::sync::mpsc::channel(128);
+        dashboard.start_full_refresh(&tx);
+        let generation = dashboard.request_generation;
+        let mut snapshot = dashboard.state.items[0].clone();
+        snapshot.status = crate::state::ProjectStatus::Ready;
+        snapshot.pipeline =
+            Some(serde_json::from_str(r#"{"id":42,"status":"running"}"#).expect("pipeline"));
+        let fetched = std::time::Instant::now();
+        let progress = |instance, name: &str| {
+            let mut snapshot = snapshot.clone();
+            snapshot.configured.name = name.into();
+            super::AppEvent::FullRefreshProgress {
+                instance,
+                generation,
+                snapshot: Box::new(snapshot),
+                updated_at: fetched,
+            }
+        };
+        super::handle_refresh_event(progress(1, "wrong tab"), &mut dashboard, &tx);
+        assert_eq!(dashboard.state.items[0].configured.name, "project");
+        super::handle_refresh_event(progress(0, "loaded"), &mut dashboard, &tx);
+        assert_eq!(dashboard.state.items[0].configured.name, "loaded");
+        assert_eq!(dashboard.state.last_updates[&1], fetched);
+        assert!(dashboard.full_refresh.is_some());
+        assert!(dashboard.state.is_refreshing);
+        super::refresh_active_projects(&mut dashboard, &tx);
+        assert!(dashboard.refreshes[&(1, 0)].generation > generation);
+        super::handle_refresh_event(progress(0, "stale"), &mut dashboard, &tx);
+        assert_eq!(dashboard.state.items[0].configured.name, "loaded");
+        dashboard.stop_refreshes();
     }
 }

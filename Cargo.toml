@@ -4,7 +4,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.2.2"
+version = "0.3.0"
 license = "MIT"
 authors = ["Alexander Masaev <dsszs3333@gmail.com>"]
 rust-version = "1.88"
@@ -32,10 +32,10 @@ match_same_arms = "deny"
 [workspace.dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 httpmock = "0.8"
 keyring = { version = "3.6", features = ["apple-native", "linux-native", "windows-native"] }
-ratatui = "0.29"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "underline-color", "layout-cache"] }
 ring = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "gzip", "socks"] }
 rpassword = "7"

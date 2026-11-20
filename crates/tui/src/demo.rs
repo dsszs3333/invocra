@@ -24,6 +24,7 @@ impl InstanceRuntime {
             })
             .collect();
         Ok(Self {
+            request_overrides: Default::default(),
             url: DEMO_URL.into(),
             client,
             sources: RefreshSources {
@@ -78,11 +79,15 @@ mod tests {
         assert!(dashboard.active_store().is_none());
         let (tx, mut rx) = mpsc::channel(8);
         dashboard.start_full_refresh(&tx);
-        let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("offline refresh")
-            .expect("event");
-        assert!(handle_refresh_event(event, &mut dashboard, &tx).is_none());
+        while dashboard.full_refresh.is_some() {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("offline refresh")
+                .expect("event");
+            assert!(handle_refresh_event(event, &mut dashboard, &tx).is_none());
+        }
+        crate::update_request_status(&mut dashboard);
+        assert_eq!(dashboard.state.request_status, "Demo | embedded data");
         assert_eq!(dashboard.state.items.len(), 5);
         assert!(dashboard
             .state

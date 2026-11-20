@@ -11,6 +11,7 @@ description = "GitLab REST client used by invocra, a GitLab CI/CD TUI dashboard"
 workspace = true
 
 [dependencies]
+httpdate = "1"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -21,4 +22,5 @@ urlencoding.workspace = true
 tempfile.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 httpmock.workspace = true

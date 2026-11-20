@@ -9,6 +9,8 @@ use tracing::instrument;
 
 mod demo;
 mod http;
+mod rate_limit;
+pub use rate_limit::RequestStatus;
 
 /// Reserved, fictional server used by the built-in demo.
 pub const DEMO_URL: &str = "https://demo.gitlab.example";
@@ -100,6 +102,7 @@ impl GitLabError {
 /// GitLab API client backed by HTTP or built-in demo data.
 #[derive(Debug, Clone)]
 pub struct GitLabClient {
+    auto_refresh: bool,
     backend: Backend,
 }
 
@@ -116,6 +119,7 @@ impl GitLabClient {
     /// Returns an error if the embedded fixtures cannot be decoded.
     pub fn demo() -> Result<Self> {
         Ok(Self {
+            auto_refresh: true,
             backend: Backend::Demo(demo::DemoClient::new()?),
         })
     }
@@ -142,8 +146,57 @@ impl GitLabClient {
         proxy: Option<&str>,
     ) -> Result<Self> {
         Ok(Self {
+            auto_refresh: true,
             backend: Backend::Http(http::HttpClient::new(base_url, token, proxy)?),
         })
+    }
+
+    /// Applies a per-instance request budget. Clones share pacing and server cooldowns.
+    /// `None` removes local pacing; server limits are always respected.
+    pub fn with_request_policy(
+        mut self,
+        limit: Option<std::num::NonZeroU32>,
+        automatic: bool,
+    ) -> Self {
+        if let Backend::Http(http) = &self.backend {
+            http.limiter.configure(limit);
+        }
+        self.auto_refresh = automatic;
+        self
+    }
+
+    pub fn auto_refresh(&self) -> bool {
+        self.auto_refresh
+    }
+
+    /// A low-priority handle sharing this instance's transport and budget.
+    pub fn background(&self) -> Self {
+        let mut client = self.clone();
+        if let Backend::Http(http) = &mut client.backend {
+            http.priority = rate_limit::Priority::Background;
+        }
+        client
+    }
+
+    /// A polling handle for the pipeline currently displayed, sharing the instance's budget.
+    pub fn for_open_pipeline(&self) -> Self {
+        let mut client = self.clone();
+        if let Backend::Http(http) = &mut client.backend {
+            http.priority = rate_limit::Priority::OpenPipeline;
+        }
+        client
+    }
+
+    /// Whether this handle is an ordinary background poll, rather than a user/open-panel request.
+    pub fn is_background(&self) -> bool {
+        matches!(&self.backend, Backend::Http(http) if http.priority == rate_limit::Priority::Background)
+    }
+
+    pub fn request_status(&self) -> RequestStatus {
+        match &self.backend {
+            Backend::Http(http) => http.limiter.status(),
+            Backend::Demo(_) => RequestStatus::default(),
+        }
     }
 
     #[instrument(skip(self))]
@@ -716,14 +769,31 @@ fn next_page_from_headers(headers: &reqwest::header::HeaderMap) -> Result<Option
     Ok(parse_next_page_header(value).map(ToOwned::to_owned))
 }
 
-/// Parses a `Retry-After` header expressed as an integer number of seconds (the form GitLab uses).
-/// HTTP-date forms are ignored, falling back to the caller's default.
-fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+fn server_time(headers: &reqwest::header::HeaderMap) -> std::time::SystemTime {
     headers
-        .get(reqwest::header::RETRY_AFTER)
+        .get(reqwest::header::DATE)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.trim().parse::<u64>().ok())
+        .and_then(|value| httpdate::parse_http_date(value).ok())
+        .unwrap_or_else(std::time::SystemTime::now)
+}
+
+/// Parses either HTTP Retry-After form relative to the server clock when available.
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim();
+    value
+        .parse::<u64>()
+        .ok()
         .map(Duration::from_secs)
+        .or_else(|| {
+            httpdate::parse_http_date(value).ok().map(|date| {
+                date.duration_since(server_time(headers))
+                    .unwrap_or_default()
+            })
+        })
 }
 
 /// CI status shared by pipelines and jobs.
@@ -1437,7 +1507,33 @@ mod tests {
             "retry-after",
             HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
         );
+        assert_eq!(retry_after(&headers), Some(std::time::Duration::ZERO));
+
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(120);
+        headers.insert(
+            "retry-after",
+            httpdate::fmt_http_date(future).parse().expect("date"),
+        );
+        assert!(retry_after(&headers).expect("HTTP date") >= std::time::Duration::from_secs(119));
+        headers.insert("retry-after", HeaderValue::from_static("invalid"));
         assert_eq!(retry_after(&headers), None);
+    }
+
+    #[test]
+    fn retry_after_http_date_uses_server_time_despite_local_clock_skew() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "date",
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
+        );
+        headers.insert(
+            "retry-after",
+            HeaderValue::from_static("Wed, 21 Oct 2015 07:30:00 GMT"),
+        );
+        assert_eq!(
+            retry_after(&headers),
+            Some(std::time::Duration::from_secs(120))
+        );
     }
 
     #[tokio::test]
@@ -1775,7 +1871,10 @@ mod tests {
             .await;
 
         let client = super::GitLabClient::new(server.base_url(), "token", None).expect("client");
-        let err = client.get_job_trace(7, 10).await.expect_err("still throttled");
+        let err = client
+            .get_job_trace(7, 10)
+            .await
+            .expect_err("still throttled");
 
         throttled.assert_calls_async(2).await;
         assert_eq!(err.http_status(), Some(429));

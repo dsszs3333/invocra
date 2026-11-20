@@ -26,6 +26,7 @@ pub(crate) const fn job_duration_secs(seconds: f64) -> u64 {
 
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
+    pub details_updated_at: Option<Instant>,
     pub configured: ProjectEntry,
     pub project: Option<Project>,
     pub pipeline: Option<Pipeline>,
@@ -47,6 +48,7 @@ pub enum ProjectStatus {
 impl ProjectSnapshot {
     fn loading(configured: ProjectEntry) -> Self {
         Self {
+            details_updated_at: None,
             configured,
             project: None,
             pipeline: None,
@@ -65,6 +67,7 @@ impl ProjectSnapshot {
         };
 
         Self {
+            details_updated_at: None,
             configured,
             project: cached.project,
             pipeline: cached.pipeline,
@@ -448,6 +451,7 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
 /// instead of the snapshot's latest. Transient — never persisted.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ViewedPipeline {
+    pub(crate) details_updated_at: Option<Instant>,
     /// Project the pipeline belongs to — differs from the dashboard project's id when inspecting
     /// a downstream pipeline of a multi-project bridge.
     pub(crate) project_id: u64,
@@ -1021,6 +1025,10 @@ pub struct AppState {
     pub(crate) branches: BranchesState,
     pub(crate) is_refreshing: bool,
     pub(crate) status_message: String,
+    pub(crate) auto_refresh: bool,
+    pub(crate) request_status: String,
+    pub(crate) request_hint: String,
+    pub(crate) last_updates: HashMap<u64, Instant>,
     pub(crate) cached_view: CachedView,
     /// Projects with a mutating action in flight, awaiting their single-project refresh.
     pub(crate) pending_actions: HashSet<u64>,
@@ -1086,6 +1094,10 @@ impl AppState {
             ref_overrides: HashMap::new(),
             branches: BranchesState::default(),
             is_refreshing: true,
+            auto_refresh: true,
+            request_status: String::new(),
+            request_hint: String::new(),
+            last_updates: HashMap::new(),
             status_message: String::from("Loading projects..."),
             cached_view: CachedView::live(),
             pending_actions: HashSet::new(),
@@ -1149,6 +1161,10 @@ impl AppState {
             ref_overrides: cached_state.ref_overrides,
             branches: BranchesState::default(),
             is_refreshing: true,
+            auto_refresh: true,
+            request_status: String::new(),
+            request_hint: String::new(),
+            last_updates: HashMap::new(),
             status_message: String::from("Showing cached data while refreshing..."),
             cached_view: CachedView::cached(cached_state.saved_at_unix_seconds),
             pending_actions: HashSet::new(),
@@ -1782,6 +1798,10 @@ impl AppState {
 
         let view = self.log.as_mut()?;
         view.job_status = status.to_string();
+        if !self.auto_refresh {
+            view.follow = false;
+            return None;
+        }
         let request = TraceFetchRequest {
             project_id,
             job_id,
@@ -1845,13 +1865,26 @@ impl AppState {
 
     pub(crate) fn apply_live_refresh(
         &mut self,
-        snapshots: Vec<ProjectSnapshot>,
+        mut snapshots: Vec<ProjectSnapshot>,
         errors: usize,
         is_complete_failure: bool,
         group_errors: &[String],
     ) {
-        for snapshot in &snapshots {
+        for snapshot in &mut snapshots {
             self.sync_timer_anchors(snapshot);
+            if snapshot.is_failed() {
+                if let Some(previous) = self
+                    .items
+                    .iter_mut()
+                    .find(|item| item.configured.id == snapshot.configured.id)
+                {
+                    snapshot.project = snapshot.project.take().or_else(|| previous.project.take());
+                    snapshot.pipeline = previous.pipeline.take();
+                    snapshot.jobs = std::mem::take(&mut previous.jobs);
+                    snapshot.bridges = std::mem::take(&mut previous.bridges);
+                    snapshot.details_updated_at = previous.details_updated_at;
+                }
+            }
         }
         self.items = snapshots;
         self.ensure_selection();
@@ -2068,6 +2101,7 @@ mod tests {
     #[test]
     fn project_snapshot_reports_loading_only_for_loading_status() {
         let snapshot = ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2085,6 +2119,7 @@ mod tests {
     #[test]
     fn project_snapshot_reports_error_message_for_failed_status() {
         let snapshot = ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2185,6 +2220,7 @@ mod tests {
 
         state.apply_live_refresh(
             vec![ProjectSnapshot {
+                details_updated_at: None,
                 bridges: Vec::new(),
                 configured: entry("group/api", 1),
                 project: None,
@@ -2210,6 +2246,7 @@ mod tests {
 
         state.apply_live_refresh(
             vec![ProjectSnapshot {
+                details_updated_at: None,
                 bridges: Vec::new(),
                 configured: entry("group/api", 1),
                 project: None,
@@ -2227,11 +2264,45 @@ mod tests {
     }
 
     #[test]
+    fn offline_project_keeps_its_details_during_a_mixed_full_refresh() {
+        let mut state = AppState::new(static_sources(vec![entry("group/api", 1), entry("group/web", 2)]));
+        let mut live = snapshot_with_status(1, "running");
+        live.jobs.push(job(9, "build", "running"));
+        live.bridges.push(gitlab::Bridge {
+            id: 10,
+            name: "downstream".into(),
+            status: "running".into(),
+            stage: None,
+            downstream_pipeline: None,
+        });
+        state.apply_project_auto_refresh(live);
+        state.apply_project_auto_refresh(snapshot_with_status(2, "running"));
+
+        let mut unavailable = ProjectSnapshot::loading(entry("group/api", 1));
+        unavailable.status = ProjectStatus::Failed("503 Service Unavailable".into());
+        let mut empty = ProjectSnapshot::loading(entry("group/web", 2));
+        empty.status = ProjectStatus::Ready;
+        state.apply_live_refresh(vec![unavailable, empty], 1, false, &[]);
+
+        let api = &state.items[0];
+        assert_eq!(api.error_message(), Some("503 Service Unavailable"));
+        assert_eq!(api.pipeline.as_ref().expect("saved pipeline").id, 1);
+        assert_eq!(api.jobs[0].id, 9);
+        assert_eq!(api.bridges[0].id, 10);
+        assert!(state.to_cached_state_ref().snapshots[0].pipeline.is_some());
+        assert_eq!(state.items[1].configured.id, 2);
+        assert!(state.items[1].pipeline.is_none());
+        assert!(!state.items[1].has_error());
+        assert_eq!(state.status_message, "Loaded with 1 error(s)");
+    }
+
+    #[test]
     fn apply_project_refresh_replaces_snapshot_and_clears_pending_action() {
         let mut state = AppState::new(static_sources(vec![entry("group/api", 1)]));
         state.pending_actions.insert(1);
 
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2254,6 +2325,7 @@ mod tests {
         assert!(state.project_has_in_flight(1));
 
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2271,6 +2343,7 @@ mod tests {
     /// A ready snapshot for project `id` carrying a pipeline of the given status.
     fn snapshot_with_status(id: u64, status: &str) -> ProjectSnapshot {
         ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", id),
             project: None,
@@ -2388,6 +2461,7 @@ mod tests {
     fn state_with_latest(latest_jobs: Vec<gitlab::Job>) -> AppState {
         let mut state = AppState::new(static_sources(vec![entry("group/api", 1)]));
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2409,6 +2483,7 @@ mod tests {
         state.viewed_pipeline.insert(
             1,
             super::ViewedPipeline {
+                details_updated_at: None,
                 project_id: 1,
                 bridges: Vec::new(),
                 pipeline: pipeline(7, "failed"),
@@ -2430,6 +2505,7 @@ mod tests {
     fn browse_url_targets_the_focused_context() {
         let mut state = AppState::new(static_sources(vec![entry("group/api", 1)]));
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: Some(gitlab::Project {
@@ -2474,6 +2550,7 @@ mod tests {
         state.log = None;
         state.focus = super::Focus::Projects;
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2491,6 +2568,7 @@ mod tests {
         state.viewed_pipeline.insert(
             1,
             super::ViewedPipeline {
+                details_updated_at: None,
                 project_id: 1,
                 bridges: Vec::new(),
                 pipeline: pipeline(7, "failed"),
@@ -2501,6 +2579,7 @@ mod tests {
         );
 
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2520,6 +2599,7 @@ mod tests {
         state.viewed_pipeline.insert(
             1,
             super::ViewedPipeline {
+                details_updated_at: None,
                 project_id: 1,
                 bridges: Vec::new(),
                 pipeline: pipeline(7, "failed"),
@@ -2530,6 +2610,7 @@ mod tests {
         );
 
         state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2554,6 +2635,7 @@ mod tests {
         state.selected_job = 2;
 
         state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2584,6 +2666,7 @@ mod tests {
         let mut state = state_with_open_log("created", view);
 
         let request = state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2611,6 +2694,7 @@ mod tests {
         let mut state = state_with_open_log("created", view);
 
         let request = state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2636,6 +2720,7 @@ mod tests {
         let mut state = state_with_open_log("running", view);
 
         let request = state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2660,6 +2745,7 @@ mod tests {
             entry("group/cleanup", 3),
         ]));
         let snapshot = |id: u64, name: &str, status: &str| ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry(name, id),
             project: None,
@@ -2697,6 +2783,7 @@ mod tests {
 
         // A pending job with no duration is not anchored.
         state.apply_project_auto_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: None,
@@ -2824,6 +2911,7 @@ mod tests {
         // Seed both projects onto the dashboard so the jump target exists.
         for id in [1, 2] {
             state.apply_project_refresh(ProjectSnapshot {
+                details_updated_at: None,
                 bridges: Vec::new(),
                 configured: entry("group/x", id),
                 project: None,
@@ -2871,6 +2959,7 @@ mod tests {
         assert_eq!(state.effective_ref(1), None);
 
         state.apply_project_refresh(ProjectSnapshot {
+            details_updated_at: None,
             bridges: Vec::new(),
             configured: entry("group/api", 1),
             project: Some(gitlab::Project {
@@ -3100,5 +3189,12 @@ mod tests {
         // Scrolling back above the viewport pulls the offset up to the cursor.
         view.move_cursor_to(3);
         assert_eq!(view.scroll, 3);
+    }
+    #[test]
+    fn manual_refresh_updates_job_status_without_restarting_log_polling() {
+        let mut state = state_with_open_log("running", log_with_lines(5, 10));
+        state.auto_refresh = false;
+        assert!(state.sync_open_log_with_snapshot(1).is_none());
+        assert!(!state.log.as_ref().expect("log").follow);
     }
 }

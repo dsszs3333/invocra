@@ -142,6 +142,7 @@ fn commit(state: &mut OnboardingState) -> InstanceRuntime {
         .take()
         .expect("client is set before reaching the selection step");
     InstanceRuntime {
+        request_overrides: Default::default(),
         url: state.gitlab_url().to_string(),
         client,
         sources: RefreshSources { projects, groups },
@@ -158,7 +159,17 @@ fn spawn_validate(tx: mpsc::Sender<OnbEvent>, url: String, token: String) {
 async fn validate(url: String, token: String) -> Result<ValidatedData, String> {
     // ponytail: onboarding connects directly — adding a proxy-only instance would need a proxy
     // field in the wizard; set `proxy` in the config TOML for an already-configured instance.
-    let client = GitLabClient::new(&url, &token, None).map_err(|err| err.to_string())?;
+    let path = config::config_path().map_err(|err| err.to_string())?;
+    let requests = if path.exists() {
+        config::load_config_from_path(&path)
+            .map_err(|err| err.to_string())?
+            .requests_for(&url)
+    } else {
+        config::RequestSettings::default()
+    };
+    let client = GitLabClient::new(&url, &token, None)
+        .map_err(|err| err.to_string())?
+        .with_request_policy(requests.limit(), requests.automatic());
     client.get_current_user().await.map_err(|err| {
         if err.is_unauthorized() {
             String::from("Invalid token (401). Check the value and that it has `api` scope.")

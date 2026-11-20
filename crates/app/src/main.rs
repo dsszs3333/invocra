@@ -229,7 +229,11 @@ async fn doctor() -> Result<()> {
             println!("  API check: skipped (no token)");
             continue;
         };
-        let client = GitLabClient::new(&instance.url, token, instance.proxy.as_deref())?;
+        let client = GitLabClient::new(&instance.url, token, instance.proxy.as_deref())?
+            .with_request_policy(
+                config.requests_for(&instance.url).limit(),
+                config.requests_for(&instance.url).automatic(),
+            );
         if let Some(project) = instance.projects.first() {
             match client.get_project(project.id).await {
                 Ok(project) => println!("  API check: ok ({})", project.name),
@@ -273,7 +277,10 @@ async fn discover_projects(url: Option<String>) -> Result<()> {
         })?;
     // Reuse the instance's configured proxy (if any) so discovery works through the same tunnel.
     let proxy = config.proxy_for(&target_url);
-    let client = GitLabClient::new(&target_url, token, proxy.as_deref())?;
+    let client = GitLabClient::new(&target_url, token, proxy.as_deref())?.with_request_policy(
+        config.requests_for(&target_url).limit(),
+        config.requests_for(&target_url).automatic(),
+    );
 
     let projects = client.list_projects().await?;
     if projects.is_empty() {
@@ -315,9 +322,11 @@ async fn discover_projects(url: Option<String>) -> Result<()> {
         .map(|instance| instance.groups.clone())
         .unwrap_or_default();
     let allow_insecure_http = config.allow_insecure_http_for(&target_url);
+    let requests = config.request_overrides_for(&target_url);
     config::upsert_instance(
         &mut config,
         InstanceConfig {
+            requests,
             url: target_url.clone(),
             proxy,
             allow_insecure_http,
@@ -344,8 +353,13 @@ async fn launch_tui() -> Result<()> {
     for instance in &config.instances {
         match TokenStore::for_instance(&instance.url).load_token()? {
             Some(token) => {
-                let client = GitLabClient::new(&instance.url, token, instance.proxy.as_deref())?;
+                let client = GitLabClient::new(&instance.url, token, instance.proxy.as_deref())?
+                    .with_request_policy(
+                        config.requests_for(&instance.url).limit(),
+                        config.requests_for(&instance.url).automatic(),
+                    );
                 runtimes.push(tui::InstanceRuntime {
+                    request_overrides: instance.requests,
                     url: instance.url.clone(),
                     client,
                     sources: tui::RefreshSources {
@@ -379,12 +393,20 @@ async fn launch_setup(mut config: AppConfig, replace_sample: bool) -> Result<()>
         .instances
         .first()
         .map(|instance| instance.url.clone());
-    let Some(instances) = tui::run_onboarding(default_url).await? else {
+    let Some(mut instances) = tui::run_onboarding(default_url).await? else {
         println!("Setup cancelled. Run `invocra setup` to retry.");
         return Ok(());
     };
     merge_setup_instances(&mut config, &instances, replace_sample);
     save_config(&config)?;
+    for rt in &mut instances {
+        let requests = config.requests_for(&rt.url);
+        rt.request_overrides = config.request_overrides_for(&rt.url);
+        rt.client = rt
+            .client
+            .clone()
+            .with_request_policy(requests.limit(), requests.automatic());
+    }
     tui::run_dashboard(instances, config.settings.notifications).await
 }
 
@@ -398,6 +420,7 @@ fn merge_setup_instances(
     }
     for rt in instances {
         let instance = InstanceConfig {
+            requests: config.request_overrides_for(&rt.url),
             url: rt.url.clone(),
             proxy: config.proxy_for(&rt.url),
             allow_insecure_http: config.allow_insecure_http_for(&rt.url),
@@ -454,6 +477,7 @@ mod tests {
     fn discovery_url_enforces_instance_transport_policy_before_loading_token() {
         let mut cfg = config::AppConfig {
             instances: vec![config::InstanceConfig {
+                requests: Default::default(),
                 url: "http://git.example".into(),
                 proxy: None,
                 allow_insecure_http: false,
@@ -476,6 +500,7 @@ mod tests {
     #[test]
     fn explicit_setup_updates_one_instance_without_losing_others() {
         let make = |url: &str| config::InstanceConfig {
+            requests: Default::default(),
             url: url.into(),
             proxy: Some("socks5://localhost:1080".into()),
             allow_insecure_http: false,
@@ -489,8 +514,16 @@ mod tests {
             ],
             settings: config::Settings::default(),
         };
+        cfg.instances[0].requests = config::RequestSettings {
+            requests_per_minute: Some(config::RequestLimit::Unlimited(
+                config::Unlimited::Unlimited,
+            )),
+            auto_refresh: Some(false),
+        };
+        let original_policy = cfg.instances[0].requests;
         let second = cfg.instances[1].clone();
         let selected = [tui::InstanceRuntime {
+            request_overrides: Default::default(),
             url: "https://first.example".into(),
             client: gitlab::GitLabClient::new("https://first.example", "test", None)
                 .expect("client"),
@@ -505,6 +538,7 @@ mod tests {
         super::merge_setup_instances(&mut cfg, &selected, false);
         assert_eq!(cfg.instances.len(), 2);
         assert_eq!(cfg.instances[1], second);
+        assert_eq!(cfg.instances[0].requests, original_policy);
         assert_eq!(cfg.instances[0].projects[0].id, 10);
         assert_eq!(
             cfg.instances[0].proxy.as_deref(),

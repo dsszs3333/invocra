@@ -379,6 +379,7 @@ fn handle_pipelines_input(state: &mut AppState, code: KeyCode) -> Vec<Command> {
             state.viewed_pipeline.insert(
                 project_id,
                 ViewedPipeline {
+                    details_updated_at: None,
                     project_id,
                     bridges: Vec::new(),
                     pipeline,
@@ -411,7 +412,7 @@ fn log_consumes_key(state: &AppState, code: KeyCode) -> bool {
         return true;
     }
     match code {
-        KeyCode::Char('j' | 'k' | 'g' | 'G' | 'f' | 'v' | 'y' | '/' | 'n' | 'N')
+        KeyCode::Char('j' | 'k' | 'g' | 'G' | 'f' | 'r' | 'v' | 'y' | '/' | 'n' | 'N')
         | KeyCode::Up
         | KeyCode::Down
         | KeyCode::PageUp
@@ -475,6 +476,22 @@ fn handle_log_input(state: &mut AppState, code: KeyCode) -> Vec<Command> {
         KeyCode::Char('n') => view.search_next(),
         KeyCode::Char('N') => view.search_prev(),
         // Follow mode only applies outside a selection; tailing pins the cursor to the last line.
+        KeyCode::Char('r') if !view.loading => {
+            view.loading = true;
+            state.log_generation += 1;
+            view.generation = state.log_generation;
+            return vec![Command::FetchTrace {
+                project_id: view.project_id,
+                job_id: view.job_id,
+                generation: view.generation,
+            }];
+        }
+        KeyCode::Char('f') if !state.auto_refresh => {
+            view.notice = Some(
+                "Manual mode: r refreshes the log; enable auto_refresh in projects.toml to follow"
+                    .into(),
+            );
+        }
         KeyCode::Char('f') if view.select_anchor.is_none() => return log_toggle_follow(view),
         KeyCode::Char('y') => return log_yank(view),
         _ => log_move_cursor(view, code),
@@ -1310,6 +1327,7 @@ fn open_downstream_pipeline(state: &mut AppState) -> Vec<Command> {
     state.viewed_pipeline.insert(
         project_id,
         ViewedPipeline {
+            details_updated_at: None,
             project_id: downstream.project_id,
             pipeline: Pipeline {
                 id: downstream.id,
@@ -1344,7 +1362,7 @@ fn open_job_log(state: &mut AppState) -> Vec<Command> {
     let generation = state.log_generation;
     // Follow any in-flight job (created/pending/preparing/running/…), not just running, so a log
     // opened before the job starts producing output still streams once it does.
-    let follow = job.status.is_active();
+    let follow = state.auto_refresh && job.status.is_active();
     // Load into the persistent log pane and focus it; it stays visible after the user
     // navigates away, until another job log replaces it.
     state.log = Some(LogViewState {
@@ -1495,6 +1513,7 @@ fn open_mr_pipeline(state: &mut AppState) -> Vec<Command> {
     state.viewed_pipeline.insert(
         dashboard_project,
         ViewedPipeline {
+            details_updated_at: None,
             project_id: mr_project,
             pipeline: pipeline.clone(),
             jobs: Vec::new(),
@@ -1705,6 +1724,7 @@ mod tests {
         let mut state = state_with_projects(&[("group/api", 1)]);
         state.apply_live_refresh(
             vec![ProjectSnapshot {
+                details_updated_at: None,
                 bridges: Vec::new(),
                 configured: ProjectEntry {
                     name: String::from("group/api"),
@@ -2736,6 +2756,7 @@ mod tests {
         state.viewed_pipeline.insert(
             1,
             crate::state::ViewedPipeline {
+                details_updated_at: None,
                 project_id: 1,
                 bridges: Vec::new(),
                 pipeline: older_pipeline(7, 5, "failed"),
@@ -2796,6 +2817,7 @@ mod tests {
             state.viewed_pipeline.insert(
                 1,
                 crate::state::ViewedPipeline {
+                    details_updated_at: None,
                     project_id,
                     pipeline: viewed,
                     jobs: vec![job(999, "downstream", "failed")],
@@ -2890,5 +2912,27 @@ mod tests {
             .as_deref()
             .expect("disabled reason")
             .contains("SHA"));
+    }
+    #[test]
+    fn manual_mode_opens_log_once_and_r_refreshes_without_enabling_follow() {
+        let mut state = state_with_pipeline("running", vec![job(10, "build", "running")]);
+        state.auto_refresh = false;
+        press(&mut state, KeyCode::Char('3'));
+        assert!(matches!(
+            press(&mut state, KeyCode::Enter).as_slice(),
+            [Command::FetchTrace { .. }]
+        ));
+        assert!(!state.log.as_ref().expect("log").follow);
+        state.log.as_mut().expect("log").loading = false;
+        assert!(press(&mut state, KeyCode::Char('f')).is_empty());
+        assert!(!state.log.as_ref().expect("log").follow);
+        let old_generation = state.log.as_ref().expect("log").generation;
+        assert!(matches!(
+            press(&mut state, KeyCode::Char('r')).as_slice(),
+            [Command::FetchTrace { .. }]
+        ));
+        assert!(state.log.as_ref().expect("log").generation > old_generation);
+        assert!(press(&mut state, KeyCode::Char('r')).is_empty());
+        assert!(!state.log.as_ref().expect("log").follow);
     }
 }

@@ -58,7 +58,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-audit --locked --version 0.22.2
-      - run: cargo audit
+      - run: cargo audit --deny warnings
       - run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev libsecret-1-dev
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

@@ -158,7 +158,7 @@ pub(crate) fn spawn_trace_fetch(
     job_id: u64,
     generation: u64,
     delay: Option<Duration>,
-) {
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         if let Some(delay) = delay {
             tokio::time::sleep(delay).await;
@@ -176,7 +176,7 @@ pub(crate) fn spawn_trace_fetch(
                 result,
             })
             .await;
-    });
+    })
 }
 
 /// Why a variables fetch failed, pre-classified so the UI can phrase 403 helpfully.
@@ -374,7 +374,11 @@ pub(crate) fn spawn_pipeline_jobs_fetch(
     pipeline_id: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let _permit = crate::refresh::REFRESH_LIMIT.acquire().await;
+        let _permit = if client.is_background() {
+            Some(crate::refresh::REFRESH_LIMIT.acquire().await)
+        } else {
+            None
+        };
         let (pipeline, jobs, bridges) = tokio::join!(
             client.get_pipeline(pipeline_project_id, pipeline_id),
             client.get_pipeline_jobs(pipeline_project_id, pipeline_id),

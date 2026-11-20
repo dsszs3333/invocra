@@ -11,7 +11,7 @@ cargo build --workspace --locked
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo package -p invocra-config --locked
-cargo audit
+cargo audit --deny warnings
 ```
 
 ## Code style

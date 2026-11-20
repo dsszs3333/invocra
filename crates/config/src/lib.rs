@@ -133,9 +133,56 @@ impl GroupEntry {
     }
 }
 
+/// Local request budget: a positive count per minute, or the literal `"unlimited"`.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum RequestLimit {
+    PerMinute(std::num::NonZeroU32),
+    Unlimited(Unlimited),
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Unlimited {
+    Unlimited,
+}
+
+/// Missing instance fields inherit global settings; missing global fields use safe defaults.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RequestSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requests_per_minute: Option<RequestLimit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_refresh: Option<bool>,
+}
+
+impl RequestSettings {
+    pub fn resolve(self, defaults: Self) -> Self {
+        Self {
+            requests_per_minute: self.requests_per_minute.or(defaults.requests_per_minute),
+            auto_refresh: self.auto_refresh.or(defaults.auto_refresh),
+        }
+    }
+
+    /// Defaults to 80/minute; `unlimited` explicitly removes an inherited budget.
+    pub fn limit(self) -> Option<std::num::NonZeroU32> {
+        match self.requests_per_minute {
+            Some(RequestLimit::PerMinute(limit)) => Some(limit),
+            Some(RequestLimit::Unlimited(_)) => None,
+            None => std::num::NonZeroU32::new(80),
+        }
+    }
+
+    pub fn automatic(self) -> bool {
+        self.auto_refresh.unwrap_or(true)
+    }
+}
+
 /// A single configured GitLab instance: its URL and the projects/groups tracked on it.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct InstanceConfig {
+    #[serde(flatten)]
+    pub requests: RequestSettings,
     pub url: String,
     /// Optional HTTP/HTTPS/SOCKS5 proxy this instance's requests route through, e.g.
     /// `socks5://127.0.0.1:1080`. Lets a VPN-only instance use a tunnel without forcing the others
@@ -157,6 +204,8 @@ pub struct InstanceConfig {
 /// Global, instance-independent preferences (the `[settings]` table).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Settings {
+    #[serde(flatten)]
+    pub requests: RequestSettings,
     /// Ring the terminal bell and post a desktop notification when a watched pipeline finishes.
     #[serde(default = "default_true")]
     pub notifications: bool,
@@ -166,6 +215,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             notifications: true,
+            requests: RequestSettings::default(),
         }
     }
 }
@@ -211,6 +261,7 @@ impl RawConfig {
             let url = self.gitlab_url.ok_or(ConfigError::EmptyInstanceUrl)?;
             return Ok(AppConfig {
                 instances: vec![InstanceConfig {
+                    requests: Default::default(),
                     url,
                     proxy: None,
                     allow_insecure_http: false,
@@ -242,6 +293,20 @@ pub fn upsert_instance(config: &mut AppConfig, instance: InstanceConfig) {
 }
 
 impl AppConfig {
+    /// Instance overrides, preserved when the wizard or discovery rewrites project selections.
+    pub fn request_overrides_for(&self, url: &str) -> RequestSettings {
+        self.instances
+            .iter()
+            .find(|instance| instance.url == url)
+            .map(|instance| instance.requests)
+            .unwrap_or_default()
+    }
+
+    pub fn requests_for(&self, url: &str) -> RequestSettings {
+        self.request_overrides_for(url)
+            .resolve(self.settings.requests)
+    }
+
     /// The proxy configured for `url`, if that instance exists and sets one. Used to carry an
     /// instance's proxy across config rewrites that don't collect one (wizard, discovery).
     pub fn proxy_for(&self, url: &str) -> Option<String> {
@@ -476,6 +541,7 @@ id = 42
             config,
             AppConfig {
                 instances: vec![InstanceConfig {
+                    requests: Default::default(),
                     url: "https://gitlab.com".into(),
                     proxy: None,
                     allow_insecure_http: false,
@@ -654,6 +720,7 @@ path = "my-org"
         let config = AppConfig {
             instances: vec![
                 InstanceConfig {
+                    requests: Default::default(),
                     url: "https://gitlab.example.com".into(),
                     proxy: Some("socks5://127.0.0.1:1080".into()),
                     allow_insecure_http: false,
@@ -668,6 +735,7 @@ path = "my-org"
                     }],
                 },
                 InstanceConfig {
+                    requests: Default::default(),
                     url: "https://git.corp".into(),
                     proxy: None,
                     allow_insecure_http: false,
@@ -709,6 +777,7 @@ path = "my-org"
     fn validate_rejects_plaintext_http_without_optin() {
         let config = AppConfig {
             instances: vec![InstanceConfig {
+                requests: Default::default(),
                 url: "http://git.local".into(),
                 proxy: None,
                 allow_insecure_http: false,
@@ -794,5 +863,87 @@ path = "my-org"
             .expect("old content");
         assert_eq!(original, "original content");
         assert_eq!(load_config_from_path(&path).expect("new config"), cfg);
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    fn parse(raw: &str) -> Result<AppConfig> {
+        let dir = tempfile::tempdir().expect("directory");
+        let path = dir.path().join("projects.toml");
+        fs::write(&path, raw).expect("write");
+        load_config_from_path(&path)
+    }
+
+    #[test]
+    fn independent_overrides_unlimited_and_round_trip() {
+        let config = parse(
+            r#"
+[settings]
+requests_per_minute = 80
+auto_refresh = false
+[[instance]]
+url = "https://one.example"
+requests_per_minute = 100
+[[instance]]
+url = "https://two.example"
+requests_per_minute = "unlimited"
+auto_refresh = true
+[[instance]]
+url = "https://three.example"
+"#,
+        )
+        .expect("config");
+        let first = config.requests_for("https://one.example");
+        assert_eq!(first.limit().map(std::num::NonZeroU32::get), Some(100));
+        assert!(!first.automatic());
+        let second = config.requests_for("https://two.example");
+        assert_eq!(second.limit(), None);
+        assert!(second.automatic());
+        let third = config.requests_for("https://three.example");
+        assert_eq!(third.limit().map(std::num::NonZeroU32::get), Some(80));
+        assert!(!third.automatic());
+        let dir = tempfile::tempdir().expect("directory");
+        let path = dir.path().join("projects.toml");
+        save_config_to_path(&config, &path).expect("save");
+        assert_eq!(load_config_from_path(&path).expect("reload"), config);
+    }
+
+    #[test]
+    fn legacy_and_missing_settings_use_safe_defaults() {
+        let config = parse("gitlab_url = 'https://git.example'").expect("legacy");
+        let policy = config.requests_for("https://git.example");
+        assert_eq!(policy.limit().map(std::num::NonZeroU32::get), Some(80));
+        assert!(policy.automatic());
+    }
+
+    #[test]
+    fn rejects_invalid_limits_and_modes_at_both_levels() {
+        for field in [
+            "requests_per_minute = 0",
+            "requests_per_minute = -1",
+            "requests_per_minute = 1.5",
+            "requests_per_minute = 4294967296",
+            "requests_per_minute = '100'",
+            "requests_per_minute = 'off'",
+            "auto_refresh = 'false'",
+        ] {
+            assert!(
+                parse(&format!(
+                    "[settings]\n{field}\n[[instance]]\nurl = 'https://git.example'"
+                ))
+                .is_err(),
+                "global: {field}"
+            );
+            assert!(
+                parse(&format!(
+                    "[[instance]]\nurl = 'https://git.example'\n{field}"
+                ))
+                .is_err(),
+                "instance: {field}"
+            );
+        }
     }
 }

@@ -47,7 +47,7 @@ fn accordion(area: Rect, count: usize, focused: Option<usize>) -> Vec<Rect> {
 
 /// Screen rectangles of the four panels, so mouse handling can hit-test the cursor against the
 /// same layout the renderer drew. Recomputed from the terminal size (the layout is fixed, not
-/// state-dependent), which keeps render and input in lockstep without sharing mutable state.
+/// state-dependent except for the hint row), keeping render and input in lockstep.
 pub(crate) struct PanelAreas {
     pub(crate) projects: Rect,
     pub(crate) branches: Rect,
@@ -62,10 +62,13 @@ pub(crate) struct PanelAreas {
 /// Adapts to the terminal size like lazygit: when too narrow, all panels stack into one column;
 /// when the left column is too short, its panels accordion around the focused one. Both collapse
 /// unfocused panels to their title line, which the user re-expands by focusing them (Tab / 1-4).
-pub(crate) fn panel_areas(area: Rect, focus: Focus, mode: ScreenMode) -> PanelAreas {
+pub(crate) fn panel_areas(area: Rect, focus: Focus, mode: ScreenMode, hint: bool) -> PanelAreas {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(5), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(5),
+            Constraint::Length(if hint { 3 } else { 2 }),
+        ])
         .split(area);
     let (body, help) = (chunks[0], chunks[1]);
 
@@ -131,9 +134,14 @@ pub(crate) fn panel_areas(area: Rect, focus: Focus, mode: ScreenMode) -> PanelAr
 /// Number of log lines visible in the pane for a given terminal area. Mirrors the bordered-block
 /// inset that `render_job_log` applies, so the input layer's visual-mode cursor math stays in step
 /// with what the user actually sees on screen.
-pub(crate) fn log_inner_height(term_area: Rect, focus: Focus, mode: ScreenMode) -> usize {
+pub(crate) fn log_inner_height(
+    term_area: Rect,
+    focus: Focus,
+    mode: ScreenMode,
+    hint: bool,
+) -> usize {
     usize::from(
-        panel_areas(term_area, focus, mode)
+        panel_areas(term_area, focus, mode, hint)
             .log
             .height
             .saturating_sub(2),
@@ -141,9 +149,14 @@ pub(crate) fn log_inner_height(term_area: Rect, focus: Focus, mode: ScreenMode) 
 }
 
 /// Inner width of the log pane (minus its borders), used to wrap long trace lines to the window.
-pub(crate) fn log_inner_width(term_area: Rect, focus: Focus, mode: ScreenMode) -> usize {
+pub(crate) fn log_inner_width(
+    term_area: Rect,
+    focus: Focus,
+    mode: ScreenMode,
+    hint: bool,
+) -> usize {
     usize::from(
-        panel_areas(term_area, focus, mode)
+        panel_areas(term_area, focus, mode, hint)
             .log
             .width
             .saturating_sub(2),
@@ -151,7 +164,12 @@ pub(crate) fn log_inner_width(term_area: Rect, focus: Focus, mode: ScreenMode) -
 }
 
 pub(crate) fn render(frame: &mut Frame, state: &AppState) {
-    let areas = panel_areas(frame.area(), state.focus, state.screen_mode);
+    let areas = panel_areas(
+        frame.area(),
+        state.focus,
+        state.screen_mode,
+        !state.request_hint.is_empty(),
+    );
 
     projects_panel::render(frame, areas.projects, state);
     branches_panel::render(frame, areas.branches, state);
@@ -195,7 +213,7 @@ mod tests {
     #[test]
     fn narrow_terminal_stacks_panels_and_accordions_around_focus() {
         let area = Rect::new(0, 0, NARROW_WIDTH - 1, 30);
-        let a = panel_areas(area, Focus::Branches, ScreenMode::Normal);
+        let a = panel_areas(area, Focus::Branches, ScreenMode::Normal, false);
         // Single column: every panel spans the full width.
         for r in [a.projects, a.branches, a.detail, a.log] {
             assert_eq!(r.width, area.width);
@@ -210,7 +228,7 @@ mod tests {
     #[test]
     fn short_left_column_accordions_but_keeps_side_by_side_log() {
         let area = Rect::new(0, 0, 120, 12);
-        let a = panel_areas(area, Focus::Detail, ScreenMode::Normal);
+        let a = panel_areas(area, Focus::Detail, ScreenMode::Normal, false);
         // Wide enough to stay two-column: the log keeps its own pane beside the left stack.
         assert!(a.log.width < area.width);
         assert_eq!(a.projects.height, COLLAPSED);
@@ -222,13 +240,23 @@ mod tests {
     fn expanded_mode_gives_focused_panel_the_body_and_collapses_the_rest() {
         // Wide and tall: would normally be side-by-side, but Expanded forces the accordion.
         let area = Rect::new(0, 0, 200, 60);
-        let a = panel_areas(area, Focus::Log, ScreenMode::Expanded);
+        let a = panel_areas(area, Focus::Log, ScreenMode::Expanded, false);
         assert!(a.log.height > COLLAPSED);
         assert_eq!(a.projects.height, COLLAPSED);
         assert_eq!(a.branches.height, COLLAPSED);
         assert_eq!(a.detail.height, COLLAPSED);
         // The log spans the full width when expanded (no side column).
         assert_eq!(a.log.width, area.width);
+    }
+
+    #[test]
+    fn footer_allocates_a_third_row_only_for_a_hint() {
+        let area = Rect::new(0, 0, 120, 30);
+        let normal = panel_areas(area, Focus::Log, ScreenMode::Expanded, false);
+        let hint = panel_areas(area, Focus::Log, ScreenMode::Expanded, true);
+        assert_eq!(normal.help.height, 2);
+        assert_eq!(hint.help.height, 3);
+        assert_eq!(normal.log.height, hint.log.height + 1);
     }
 
     #[test]
@@ -385,5 +413,31 @@ mod tests {
             rendered.contains("Failed to load branches"),
             "branch fetch error should be visible in the branches panel"
         );
+    }
+    #[test]
+    fn request_status_and_429_hint_are_visible_without_replacing_action_status() {
+        let mut state = AppState::new(RefreshSources::default());
+        state.is_refreshing = false;
+        state.request_status = "Server pause 120s | Manual (instance) | 100/min (default)".into();
+        state.request_hint = "429: edit ~/.config/invocra/projects.toml; restart".into();
+        state.status_message = "Action completed".into();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("terminal");
+        terminal.draw(|frame| render(frame, &state)).expect("draw");
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        for text in [
+            "Server pause 120s",
+            "Manual (instance)",
+            "100/min (default)",
+            "429: edit ~/.config/invocra/projects.toml",
+            "Action completed",
+        ] {
+            assert!(rendered.contains(text), "missing {text}");
+        }
     }
 }
